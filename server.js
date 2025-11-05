@@ -621,13 +621,21 @@ app.listen(PORT, () => {
 ║   Metric Collector Server                 ║
 ║   Running on http://localhost:${PORT}       ║
 ║                                           ║
-║   API Key: ${API_KEY.substring(0, 10)}...              ║
-║   Database: ${process.env.DB_PATH || './data/metrics.db'}   ║
+║   Master Key: ${MASTER_KEY.substring(0, 10)}...         ║
+║   Database: ${databaseUrl}                 ║
 ╚═══════════════════════════════════════════╝
 
 Quick Start:
+  # Create an API key
+  curl -X POST http://localhost:${PORT}/api/keys \\
+    -H "X-API-Key: ${MASTER_KEY}" \\
+    -H "Content-Type: application/json" \\
+    -d '{"role":"rw","name":"My App"}'
+
+  # Send metrics (use the key from above)
   curl -X POST http://localhost:${PORT}/api/metrics \\
-    -H "X-API-Key: ${API_KEY}" \\
+    -H "X-API-Key: <your-api-key>" \\
+    -H "X-App-Id: my-app" \\
     -H "Content-Type: application/json" \\
     -d '{"metric":"test","value":"42"}'
   `);
