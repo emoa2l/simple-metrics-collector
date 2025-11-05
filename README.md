@@ -164,9 +164,45 @@ curl "http://localhost:3000/api/metrics/cpu_usage?range=24h&limit=100" \
 
 Time ranges: `1h`, `24h`, `7d`, `30d`, or custom in minutes `60m`
 
-### Creating Alerts
+### Configuring Webhooks
+
+Before creating alerts, configure webhooks to receive notifications:
 
 ```bash
+# Create a webhook
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Slack Alerts",
+    "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+  }'
+
+# List all webhooks
+curl http://localhost:3000/api/webhooks \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
+
+# Disable a webhook
+curl -X PATCH http://localhost:3000/api/webhooks/1 \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+
+# Delete a webhook
+curl -X DELETE http://localhost:3000/api/webhooks/1 \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
+```
+
+### Creating Alerts
+
+Create threshold-based alerts that trigger configured webhooks:
+
+```bash
+# Create an alert
 curl -X POST http://localhost:3000/api/alerts \
   -H "X-API-Key: mk_a1b2c3d4..." \
   -H "X-App-Id: my-app" \
@@ -174,10 +210,20 @@ curl -X POST http://localhost:3000/api/alerts \
   -d '{
     "metric": "cpu_usage",
     "condition": ">",
-    "threshold": "80",
-    "webhook": "https://hooks.slack.com/..."
+    "threshold": "80"
   }'
+
+# List all alerts
+curl http://localhost:3000/api/alerts \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
 ```
+
+**How it works:**
+1. Configure one or more webhooks for your app
+2. Create alerts with metric name, condition (`>`, `<`, `>=`, `<=`, `==`, `!=`), and threshold
+3. When a metric value meets the alert condition, all enabled webhooks are called
+4. Webhook receives JSON payload with alert details, value, and timestamp
 
 ## Configuration
 

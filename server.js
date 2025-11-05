@@ -114,17 +114,13 @@ const Alert = sequelize.define('Alert', {
     type: DataTypes.STRING,
     allowNull: false
   },
-  webhook: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  email: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
   enabled: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  lastTriggered: {
+    type: DataTypes.BIGINT,
+    allowNull: true
   }
 }, {
   tableName: 'alerts'
@@ -162,6 +158,34 @@ const AwsConfig = sequelize.define('AwsConfig', {
   }
 }, {
   tableName: 'aws_configs'
+});
+
+// Define WebhookConfig model
+const WebhookConfig = sequelize.define('WebhookConfig', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  appId: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    index: true
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  url: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  enabled: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
+  }
+}, {
+  tableName: 'webhook_configs'
 });
 
 // Initialize database
@@ -241,6 +265,126 @@ async function getAwsClients(appId) {
     cloudwatch: new CloudWatchClient(config),
     sns: new SNSClient(config)
   };
+}
+
+// Helper function to check if value meets alert condition
+function checkAlertCondition(value, condition, threshold) {
+  const numValue = parseFloat(value);
+  const numThreshold = parseFloat(threshold);
+
+  if (isNaN(numValue) || isNaN(numThreshold)) {
+    return false;
+  }
+
+  switch (condition) {
+    case '>':
+      return numValue > numThreshold;
+    case '<':
+      return numValue < numThreshold;
+    case '>=':
+      return numValue >= numThreshold;
+    case '<=':
+      return numValue <= numThreshold;
+    case '==':
+      return numValue === numThreshold;
+    case '!=':
+      return numValue !== numThreshold;
+    default:
+      return false;
+  }
+}
+
+// Helper function to call webhook
+async function callWebhook(url, payload) {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Metric-Collector/1.0'
+      },
+      body: JSON.stringify(payload),
+      timeout: 5000
+    });
+
+    return {
+      success: response.ok,
+      status: response.status
+    };
+  } catch (error) {
+    console.error('Error calling webhook:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// Helper function to check and trigger alerts for a metric
+async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
+  try {
+    // Find all enabled alerts for this metric and app
+    const alerts = await Alert.findAll({
+      where: {
+        appId,
+        metric: metricName,
+        enabled: true
+      }
+    });
+
+    if (alerts.length === 0) {
+      return;
+    }
+
+    // Get all enabled webhooks for this app
+    const webhooks = await WebhookConfig.findAll({
+      where: {
+        appId,
+        enabled: true
+      }
+    });
+
+    if (webhooks.length === 0) {
+      console.log(`No webhooks configured for appId: ${appId}`);
+      return;
+    }
+
+    // Check each alert
+    for (const alert of alerts) {
+      const triggered = checkAlertCondition(value, alert.condition, alert.threshold);
+
+      if (triggered) {
+        console.log(`Alert triggered: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value})`);
+
+        // Update lastTriggered
+        await Alert.update(
+          { lastTriggered: timestamp },
+          { where: { id: alert.id } }
+        );
+
+        // Call all enabled webhooks
+        const payload = {
+          appId,
+          alert: {
+            id: alert.id,
+            metric: metricName,
+            condition: alert.condition,
+            threshold: alert.threshold
+          },
+          value,
+          timestamp,
+          triggeredAt: new Date(timestamp).toISOString()
+        };
+
+        for (const webhook of webhooks) {
+          console.log(`Calling webhook: ${webhook.name} (${webhook.url})`);
+          await callWebhook(webhook.url, payload);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error checking alerts:', error);
+  }
 }
 
 // API Key authentication middleware
@@ -557,6 +701,128 @@ app.post('/api/aws/test', requireAuth, requirePermission('r'), async (req, res) 
   }
 });
 
+// Webhook Configuration Endpoints
+
+// POST /api/webhooks - Create a webhook configuration
+app.post('/api/webhooks', requireAuth, requirePermission('w'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const { name, url } = req.body;
+
+    if (!name || !url) {
+      return res.status(400).json({ error: 'name and url are required' });
+    }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    const webhook = await WebhookConfig.create({
+      appId: req.auth.appId,
+      name,
+      url,
+      enabled: true
+    });
+
+    res.json({
+      success: true,
+      webhook
+    });
+  } catch (error) {
+    console.error('Error creating webhook:', error);
+    res.status(500).json({ error: 'Failed to create webhook' });
+  }
+});
+
+// GET /api/webhooks - List all webhooks
+app.get('/api/webhooks', requireAuth, requirePermission('r'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const webhooks = await WebhookConfig.findAll({
+      where: { appId: req.auth.appId },
+      order: [['createdAt', 'DESC']],
+      raw: true
+    });
+
+    res.json(webhooks);
+  } catch (error) {
+    console.error('Error fetching webhooks:', error);
+    res.status(500).json({ error: 'Failed to fetch webhooks' });
+  }
+});
+
+// PATCH /api/webhooks/:id - Update webhook (enable/disable)
+app.patch('/api/webhooks/:id', requireAuth, requirePermission('w'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const { id } = req.params;
+    const { enabled, name, url } = req.body;
+
+    const updates = {};
+    if (enabled !== undefined) updates.enabled = enabled;
+    if (name !== undefined) updates.name = name;
+    if (url !== undefined) {
+      try {
+        new URL(url);
+        updates.url = url;
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid URL format' });
+      }
+    }
+
+    await WebhookConfig.update(updates, {
+      where: { id, appId: req.auth.appId }
+    });
+
+    const updated = await WebhookConfig.findOne({
+      where: { id, appId: req.auth.appId }
+    });
+
+    res.json({
+      success: true,
+      webhook: updated
+    });
+  } catch (error) {
+    console.error('Error updating webhook:', error);
+    res.status(500).json({ error: 'Failed to update webhook' });
+  }
+});
+
+// DELETE /api/webhooks/:id - Delete a webhook
+app.delete('/api/webhooks/:id', requireAuth, requirePermission('w'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const { id } = req.params;
+
+    const deleted = await WebhookConfig.destroy({
+      where: { id, appId: req.auth.appId }
+    });
+
+    res.json({
+      success: true,
+      deleted: deleted > 0
+    });
+  } catch (error) {
+    console.error('Error deleting webhook:', error);
+    res.status(500).json({ error: 'Failed to delete webhook' });
+  }
+});
+
 // Metrics Endpoints
 
 // POST /api/metrics - Submit a metric
@@ -579,6 +845,11 @@ app.post('/api/metrics', requireAuth, requirePermission('w'), async (req, res) =
       metric,
       value: String(value),
       timestamp: ts
+    });
+
+    // Check and trigger alerts (non-blocking)
+    checkAndTriggerAlerts(req.auth.appId, metric, value, ts).catch(err => {
+      console.error('Error in alert checking:', err);
     });
 
     res.json({
@@ -702,7 +973,7 @@ app.delete('/api/metrics/:name', requireAuth, requirePermission('w'), async (req
 // POST /api/alerts - Create an alert
 app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) => {
   try {
-    const { metric, condition, threshold, webhook, email } = req.body;
+    const { metric, condition, threshold } = req.body;
 
     if (!metric || !condition || !threshold) {
       return res.status(400).json({ error: 'metric, condition, and threshold are required' });
@@ -712,19 +983,23 @@ app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) =>
       return res.status(400).json({ error: 'X-App-Id header is required' });
     }
 
+    // Validate condition
+    if (!['>', '<', '>=', '<=', '==', '!='].includes(condition)) {
+      return res.status(400).json({ error: 'condition must be one of: >, <, >=, <=, ==, !=' });
+    }
+
     const alert = await Alert.create({
       appId: req.auth.appId,
       metric,
       condition,
-      threshold: String(threshold),
-      webhook: webhook || null,
-      email: email || null
+      threshold: String(threshold)
     });
 
     res.json({
       success: true,
       id: alert.id,
-      appId: req.auth.appId
+      appId: req.auth.appId,
+      alert
     });
   } catch (error) {
     console.error('Error creating alert:', error);
