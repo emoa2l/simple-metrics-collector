@@ -114,13 +114,50 @@ const Alert = sequelize.define('Alert', {
     type: DataTypes.STRING,
     allowNull: false
   },
+  enterThreshold: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 3,
+    comment: 'Number of consecutive breaches before entering alert state'
+  },
+  exitThreshold: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 3,
+    comment: 'Number of consecutive recoveries before exiting alert state'
+  },
+  webhookFrequencyMinutes: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 5,
+    comment: 'Minutes between webhook calls while in alert state'
+  },
   enabled: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
   },
+  consecutiveBreaches: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Current count of consecutive breaches'
+  },
+  consecutiveRecoveries: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'Current count of consecutive recoveries'
+  },
+  isAlerting: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    comment: 'Whether alert is currently active'
+  },
   lastTriggered: {
     type: DataTypes.BIGINT,
-    allowNull: true
+    allowNull: true,
+    comment: 'Timestamp when webhook was last called'
   }
 }, {
   tableName: 'alerts'
@@ -351,35 +388,123 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
 
     // Check each alert
     for (const alert of alerts) {
-      const triggered = checkAlertCondition(value, alert.condition, alert.threshold);
+      const isBreaching = checkAlertCondition(value, alert.condition, alert.threshold);
+      const now = timestamp;
 
-      if (triggered) {
-        console.log(`Alert triggered: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value})`);
+      if (isBreaching) {
+        // Increment consecutive breaches, reset recoveries
+        const newBreachCount = alert.consecutiveBreaches + 1;
 
-        // Update lastTriggered
-        await Alert.update(
-          { lastTriggered: timestamp },
-          { where: { id: alert.id } }
-        );
+        console.log(`Metric breaching: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, breach count: ${newBreachCount}/${alert.enterThreshold})`);
 
-        // Call all enabled webhooks
-        const payload = {
-          appId,
-          alert: {
-            id: alert.id,
-            metric: metricName,
-            condition: alert.condition,
-            threshold: alert.threshold
-          },
-          value,
-          timestamp,
-          triggeredAt: new Date(timestamp).toISOString()
+        const updates = {
+          consecutiveBreaches: newBreachCount,
+          consecutiveRecoveries: 0
         };
 
-        for (const webhook of webhooks) {
-          console.log(`Calling webhook: ${webhook.name} (${webhook.url})`);
-          await callWebhook(webhook.url, payload);
+        // Check if we should enter alert state
+        if (!alert.isAlerting && newBreachCount >= alert.enterThreshold) {
+          console.log(`⚠️  ENTERING ALERT STATE: ${metricName} (${newBreachCount} consecutive breaches)`);
+          updates.isAlerting = true;
+          updates.lastTriggered = now;
+
+          // Call webhooks immediately when entering alert state
+          const payload = {
+            appId,
+            alert: {
+              id: alert.id,
+              metric: metricName,
+              condition: alert.condition,
+              threshold: alert.threshold,
+              enterThreshold: alert.enterThreshold,
+              exitThreshold: alert.exitThreshold
+            },
+            value,
+            timestamp,
+            state: 'entered',
+            consecutiveBreaches: newBreachCount,
+            triggeredAt: new Date(now).toISOString()
+          };
+
+          for (const webhook of webhooks) {
+            console.log(`Calling webhook: ${webhook.name} (${webhook.url})`);
+            await callWebhook(webhook.url, payload);
+          }
         }
+        // If already in alert state, check if we should call webhook again
+        else if (alert.isAlerting) {
+          const timeSinceLastTrigger = now - (alert.lastTriggered || 0);
+          const webhookFrequencyMs = alert.webhookFrequencyMinutes * 60 * 1000;
+
+          if (timeSinceLastTrigger >= webhookFrequencyMs) {
+            console.log(`📢 Webhook repeat: ${metricName} (still in alert state)`);
+            updates.lastTriggered = now;
+
+            const payload = {
+              appId,
+              alert: {
+                id: alert.id,
+                metric: metricName,
+                condition: alert.condition,
+                threshold: alert.threshold,
+                webhookFrequencyMinutes: alert.webhookFrequencyMinutes
+              },
+              value,
+              timestamp,
+              state: 'active',
+              consecutiveBreaches: newBreachCount,
+              triggeredAt: new Date(now).toISOString()
+            };
+
+            for (const webhook of webhooks) {
+              await callWebhook(webhook.url, payload);
+            }
+          }
+        }
+
+        await Alert.update(updates, { where: { id: alert.id } });
+
+      } else {
+        // Not breaching - increment consecutive recoveries, reset breaches
+        const newRecoveryCount = alert.consecutiveRecoveries + 1;
+
+        if (alert.isAlerting) {
+          console.log(`Metric recovering: ${metricName} (recovery count: ${newRecoveryCount}/${alert.exitThreshold})`);
+        }
+
+        const updates = {
+          consecutiveBreaches: 0,
+          consecutiveRecoveries: newRecoveryCount
+        };
+
+        // Check if we should exit alert state
+        if (alert.isAlerting && newRecoveryCount >= alert.exitThreshold) {
+          console.log(`✅ EXITING ALERT STATE: ${metricName} (${newRecoveryCount} consecutive recoveries)`);
+          updates.isAlerting = false;
+
+          // Optionally call webhook when exiting alert state
+          const payload = {
+            appId,
+            alert: {
+              id: alert.id,
+              metric: metricName,
+              condition: alert.condition,
+              threshold: alert.threshold
+            },
+            value,
+            timestamp,
+            state: 'recovered',
+            consecutiveRecoveries: newRecoveryCount,
+            triggeredAt: new Date(now).toISOString()
+          };
+
+          for (const webhook of webhooks) {
+            console.log(`Calling webhook (recovery): ${webhook.name} (${webhook.url})`);
+            await callWebhook(webhook.url, payload);
+          }
+        }
+
+        await Alert.update(updates, { where: { id: alert.id } });
       }
     }
   } catch (error) {
@@ -973,7 +1098,14 @@ app.delete('/api/metrics/:name', requireAuth, requirePermission('w'), async (req
 // POST /api/alerts - Create an alert
 app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) => {
   try {
-    const { metric, condition, threshold } = req.body;
+    const {
+      metric,
+      condition,
+      threshold,
+      enterThreshold = 3,
+      exitThreshold = 3,
+      webhookFrequencyMinutes = 5
+    } = req.body;
 
     if (!metric || !condition || !threshold) {
       return res.status(400).json({ error: 'metric, condition, and threshold are required' });
@@ -988,11 +1120,23 @@ app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) =>
       return res.status(400).json({ error: 'condition must be one of: >, <, >=, <=, ==, !=' });
     }
 
+    // Validate thresholds
+    if (enterThreshold < 1 || exitThreshold < 1) {
+      return res.status(400).json({ error: 'enterThreshold and exitThreshold must be at least 1' });
+    }
+
+    if (webhookFrequencyMinutes < 1) {
+      return res.status(400).json({ error: 'webhookFrequencyMinutes must be at least 1' });
+    }
+
     const alert = await Alert.create({
       appId: req.auth.appId,
       metric,
       condition,
-      threshold: String(threshold)
+      threshold: String(threshold),
+      enterThreshold,
+      exitThreshold,
+      webhookFrequencyMinutes
     });
 
     res.json({
@@ -1023,6 +1167,42 @@ app.get('/api/alerts', requireAuth, requirePermission('r'), async (req, res) => 
   } catch (error) {
     console.error('Error fetching alerts:', error);
     res.status(500).json({ error: 'Failed to fetch alerts' });
+  }
+});
+
+// GET /api/alert-states - Get which metrics are currently alerting
+app.get('/api/alert-states', requireAuth, requirePermission('r'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const alertingMetrics = await Alert.findAll({
+      where: {
+        appId: req.auth.appId,
+        isAlerting: true,
+        enabled: true
+      },
+      attributes: ['metric', 'condition', 'threshold', 'consecutiveBreaches', 'lastTriggered'],
+      raw: true
+    });
+
+    // Return as a map of metric name to alert state
+    const states = {};
+    for (const alert of alertingMetrics) {
+      states[alert.metric] = {
+        isAlerting: true,
+        condition: alert.condition,
+        threshold: alert.threshold,
+        consecutiveBreaches: alert.consecutiveBreaches,
+        lastTriggered: alert.lastTriggered
+      };
+    }
+
+    res.json(states);
+  } catch (error) {
+    console.error('Error fetching alert states:', error);
+    res.status(500).json({ error: 'Failed to fetch alert states' });
   }
 });
 

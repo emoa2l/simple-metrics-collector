@@ -193,6 +193,34 @@
             overflow: hidden;
         }
 
+        .chart-card-alerting {
+            background: #fee;
+            border: 2px solid #dc3545;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+        }
+
+        .chart-card-alerting .chart-card-header {
+            background: #ffe0e0;
+            border-bottom-color: #dc3545;
+        }
+
+        .alert-badge {
+            display: inline-block;
+            background: #dc3545;
+            color: white;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
         .chart-card-header {
             padding: 1rem 1.5rem;
             border-bottom: 1px solid #e0e0e0;
@@ -540,10 +568,11 @@
             Object.values(charts).forEach(chart => chart.destroy());
             charts = {};
 
-            // Load all metrics in parallel
-            const metricsData = await Promise.all(
-                metrics.map(m => apiRequest(`/api/metrics/${m.metric}?range=${currentRange}&limit=1000`))
-            );
+            // Load metrics data and alert states in parallel
+            const [metricsData, alertStates] = await Promise.all([
+                Promise.all(metrics.map(m => apiRequest(`/api/metrics/${m.metric}?range=${currentRange}&limit=1000`))),
+                apiRequest('/api/alert-states').catch(() => ({}))
+            ]);
 
             // Create chart cards
             gridView.innerHTML = metrics.map((m, i) => {
@@ -554,10 +583,15 @@
                 const max = values.length > 0 ? Math.max(...values) : 0;
                 const avg = values.length > 0 ? (values.reduce((a, b) => a + b, 0) / values.length) : 0;
 
+                // Check if this metric is currently alerting
+                const isAlerting = alertStates[m.metric]?.isAlerting || false;
+                const alertClass = isAlerting ? 'chart-card-alerting' : '';
+                const alertBadge = isAlerting ? '<span class="alert-badge">🚨 ALERT</span>' : '';
+
                 return `
-                    <div class="chart-card">
+                    <div class="chart-card ${alertClass}">
                         <div class="chart-card-header">
-                            <div class="chart-card-title">${m.metric}</div>
+                            <div class="chart-card-title">${m.metric} ${alertBadge}</div>
                             <div class="chart-card-stats">
                                 <div class="chart-card-stat">
                                     <span class="chart-card-stat-label">Latest</span>

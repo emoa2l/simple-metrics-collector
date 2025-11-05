@@ -199,10 +199,10 @@ curl -X DELETE http://localhost:3000/api/webhooks/1 \
 
 ### Creating Alerts
 
-Create threshold-based alerts that trigger configured webhooks:
+Create threshold-based alerts with smart breach detection:
 
 ```bash
-# Create an alert
+# Create an alert with default thresholds
 curl -X POST http://localhost:3000/api/alerts \
   -H "X-API-Key: mk_a1b2c3d4..." \
   -H "X-App-Id: my-app" \
@@ -213,17 +213,52 @@ curl -X POST http://localhost:3000/api/alerts \
     "threshold": "80"
   }'
 
+# Create an alert with custom thresholds
+curl -X POST http://localhost:3000/api/alerts \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metric": "cpu_usage",
+    "condition": ">",
+    "threshold": "80",
+    "enterThreshold": 5,
+    "exitThreshold": 3,
+    "webhookFrequencyMinutes": 10
+  }'
+
 # List all alerts
 curl http://localhost:3000/api/alerts \
   -H "X-API-Key: mk_a1b2c3d4..." \
   -H "X-App-Id: my-app"
+
+# Get which metrics are currently alerting
+curl http://localhost:3000/api/alert-states \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
 ```
+
+**Alert Parameters:**
+- `metric`: Metric name to monitor
+- `condition`: Comparison operator (`>`, `<`, `>=`, `<=`, `==`, `!=`)
+- `threshold`: Value to compare against
+- `enterThreshold`: Number of consecutive breaches before entering alert state (default: 3)
+- `exitThreshold`: Number of consecutive recoveries before exiting alert state (default: 3)
+- `webhookFrequencyMinutes`: How often to call webhook while in alert state (default: 5)
 
 **How it works:**
 1. Configure one or more webhooks for your app
-2. Create alerts with metric name, condition (`>`, `<`, `>=`, `<=`, `==`, `!=`), and threshold
-3. When a metric value meets the alert condition, all enabled webhooks are called
-4. Webhook receives JSON payload with alert details, value, and timestamp
+2. Create alerts with thresholds and conditions
+3. System tracks consecutive breaches
+4. When consecutive breaches >= `enterThreshold`, alert enters active state
+5. While active, webhooks are called every `webhookFrequencyMinutes`
+6. When metric recovers for `exitThreshold` consecutive times, alert exits
+7. Dashboard shows alerting metrics with red background
+
+**Webhook Payload States:**
+- `entered`: Alert just entered active state
+- `active`: Alert is ongoing (repeated notification)
+- `recovered`: Alert has cleared
 
 ## Configuration
 
