@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Metric Collector - Simple Self-Hosted Metrics Dashboard</title>
+    <title id="pageTitle">Metric Collector - Simple Self-Hosted Metrics Dashboard</title>
+    <link rel="icon" type="image/x-icon" id="favicon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 
     <!-- SEO Meta Tags -->
     <meta name="description" content="Simple, self-hosted metric aggregator. Just POST metrics and view auto-generated dashboards. Multi-tenancy, role-based API keys, and multiple database support.">
@@ -28,7 +29,14 @@
     <link rel="canonical" href="https://github.com/emoa2l/metric-collector">
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
+        :root {
+            --primary-color: #007bff;
+            --primary-color-hover: #0056b3;
+            --primary-color-light: rgba(0, 123, 255, 0.1);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -83,7 +91,7 @@
 
         .auth-section button {
             padding: 0.5rem 1rem;
-            background: #007bff;
+            background: var(--primary-color);
             color: white;
             border: none;
             border-radius: 4px;
@@ -91,7 +99,7 @@
         }
 
         .auth-section button:hover {
-            background: #0056b3;
+            background: var(--primary-color-hover);
         }
 
         .stats-grid {
@@ -106,6 +114,12 @@
             padding: 1.5rem;
             border-radius: 8px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card[onclick]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
 
         .stat-value {
@@ -191,6 +205,23 @@
             border-radius: 8px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .chart-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .chart-card-breaching {
+            background: #fffbeb;
+            border: 2px solid #fbbf24;
+            box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
+        }
+
+        .chart-card-breaching .chart-card-header {
+            background: #fef3c7;
+            border-bottom-color: #fbbf24;
         }
 
         .chart-card-alerting {
@@ -202,6 +233,17 @@
         .chart-card-alerting .chart-card-header {
             background: #ffe0e0;
             border-bottom-color: #dc3545;
+        }
+
+        .chart-card-recovering {
+            background: #eff6ff;
+            border: 2px solid #3b82f6;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+
+        .chart-card-recovering .chart-card-header {
+            background: #dbeafe;
+            border-bottom-color: #3b82f6;
         }
 
         .alert-badge {
@@ -219,6 +261,33 @@
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
+        }
+
+        /* Loading Spinner */
+        .loading-spinner {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            color: #007bff;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .loading-spinner.active {
+            display: flex;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e0e0e0;
+            border-top-color: #007bff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         .chart-card-header {
@@ -364,6 +433,164 @@
             text-decoration: none;
         }
 
+        /* Detail View Modal */
+        .detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .detail-modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .detail-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 1200px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 2rem;
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 1rem;
+        }
+
+        .detail-header h2 {
+            margin: 0;
+            color: var(--primary-color);
+        }
+
+        .close-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .close-btn:hover {
+            background: #c82333;
+        }
+
+        .detail-section {
+            margin-bottom: 2rem;
+        }
+
+        .detail-section h3 {
+            color: #333;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 0.5rem;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .stat-box {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .stat-box-label {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-box-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .webhook-history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .webhook-history-table th {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 2px solid #e0e0e0;
+            font-weight: 600;
+        }
+
+        .webhook-history-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .webhook-history-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .state-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .state-entered {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .state-active {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .state-recovered {
+            background: #d4edda;
+            color: #155724;
+        }
+
         @media (max-width: 768px) {
             .metrics-grid {
                 grid-template-columns: 1fr;
@@ -388,7 +615,8 @@
         </header>
 
         <div class="auth-section">
-            <div style="display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;">
+            <!-- Login Form (shown when not authenticated) -->
+            <div id="loginForm" style="display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;">
                 <div>
                     <label for="appId">App ID:</label>
                     <input type="text" id="appId" placeholder="e.g., my-app" style="width: 200px;">
@@ -398,7 +626,24 @@
                     <input type="password" id="apiKey" placeholder="Enter your API key">
                 </div>
                 <button onclick="setCredentials()">Save</button>
-                <span id="authStatus" style="color: #666;"></span>
+            </div>
+
+            <!-- Authenticated Status (shown when logged in) -->
+            <div id="authStatus" style="display: none;">
+                <div style="display: flex; gap: 2rem; align-items: center; flex-wrap: wrap; justify-content: space-between;">
+                    <div style="display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;">
+                        <div>
+                            <strong>App ID:</strong> <span id="authAppId" style="font-family: monospace; background: rgba(0,0,0,0.05); padding: 0.25rem 0.5rem; border-radius: 4px;"></span>
+                        </div>
+                        <div>
+                            <strong>API Key:</strong> <span style="font-family: monospace; background: rgba(0,0,0,0.05); padding: 0.25rem 0.5rem; border-radius: 4px;">••••••••</span>
+                        </div>
+                        <div>
+                            <strong>Status:</strong> <span style="color: #28a745;">✓ Authenticated</span>
+                        </div>
+                    </div>
+                    <button onclick="toggleLoginForm()" style="padding: 0.5rem 1rem; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Change Credentials</button>
+                </div>
             </div>
         </div>
 
@@ -421,6 +666,10 @@
                 <div class="stat-value" id="uptime">-</div>
                 <div class="stat-label">Uptime</div>
             </div>
+            <div class="stat-card" onclick="showAllAlerts()" style="cursor: pointer;">
+                <div class="stat-value" id="totalAlerts">-</div>
+                <div class="stat-label">Alerts</div>
+            </div>
         </div>
 
         <div class="controls-section">
@@ -434,6 +683,25 @@
                 <button onclick="changeGlobalRange('24h')" class="active">24h</button>
                 <button onclick="changeGlobalRange('7d')">7d</button>
                 <button onclick="changeGlobalRange('30d')">30d</button>
+            </div>
+            <div class="time-range-controls">
+                <label>Data Interval:</label>
+                <button onclick="changeDataInterval(10)">10s</button>
+                <button onclick="changeDataInterval(30)" class="active">30s</button>
+                <button onclick="changeDataInterval(60)">1m</button>
+                <button onclick="changeDataInterval(300)">5m</button>
+            </div>
+            <div class="time-range-controls">
+                <label>Auto-Refresh:</label>
+                <button onclick="changeRefreshRate(0)">Off</button>
+                <button onclick="changeRefreshRate(5)">5s</button>
+                <button onclick="changeRefreshRate(10)">10s</button>
+                <button onclick="changeRefreshRate(30)" class="active">30s</button>
+                <button onclick="changeRefreshRate(60)">1m</button>
+            </div>
+            <div class="loading-spinner" id="loadingSpinner">
+                <div class="spinner"></div>
+                <span>Refreshing...</span>
             </div>
         </div>
 
@@ -450,10 +718,15 @@
         <!-- Single Chart View (for list view clicks) -->
         <div class="single-chart-view" id="singleChartView">
             <div class="single-chart-header">
-                <h2 id="singleChartTitle">Metric Chart</h2>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <h2 id="singleChartTitle">Metric Chart</h2>
+                    <div id="singleChartBadge"></div>
+                </div>
                 <button class="close-btn" onclick="closeSingleChart()">Close</button>
             </div>
-            <canvas id="singleChart"></canvas>
+            <div id="singleChartContainer" style="padding: 1rem;">
+                <canvas id="singleChart"></canvas>
+            </div>
         </div>
 
         <footer>
@@ -461,25 +734,144 @@
         </footer>
     </div>
 
+    <!-- Detail View Modal -->
+    <div class="detail-modal" id="detailModal">
+        <div class="detail-content">
+            <div class="detail-header">
+                <h2 id="detailMetricName"></h2>
+                <button class="close-btn" onclick="closeDetailView()">Close</button>
+            </div>
+
+            <div class="detail-section">
+                <h3>Current State</h3>
+                <div id="detailCurrentState"></div>
+            </div>
+
+            <div class="detail-section">
+                <h3>Alert Configuration</h3>
+                <div id="detailAlertConfig"></div>
+            </div>
+
+            <div class="detail-section">
+                <h3>Webhook Statistics</h3>
+                <div id="detailWebhookStats"></div>
+            </div>
+
+            <div class="detail-section">
+                <h3>Webhook Call History (Last 100)</h3>
+                <div id="detailWebhookHistory"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Alerts Modal -->
+    <div class="detail-modal" id="alertsModal">
+        <div class="detail-content">
+            <div class="detail-header">
+                <h2>All Alerts</h2>
+                <button class="close-btn" onclick="closeAlertsModal()">Close</button>
+            </div>
+
+            <div class="detail-section">
+                <div id="allAlertsList"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
-        let apiKey = localStorage.getItem('apiKey') || '';
-        let appId = localStorage.getItem('appId') || '';
+        // Check URL parameters first, then fall back to localStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlApiKey = urlParams.get('apiKey') || urlParams.get('apikey');
+        const urlAppId = urlParams.get('appId') || urlParams.get('appid');
+
+        let apiKey = urlApiKey || localStorage.getItem('apiKey') || '';
+        let appId = urlAppId || localStorage.getItem('appId') || '';
+
+        // If URL params provided, save to localStorage for convenience
+        if (urlApiKey && urlAppId) {
+            localStorage.setItem('apiKey', urlApiKey);
+            localStorage.setItem('appId', urlAppId);
+        }
+
         let currentView = 'grid';
         let currentRange = '24h';
+        let currentDataInterval = 30; // seconds (default 30s) - expected interval between data points
+        let currentRefreshRate = 30; // seconds (default 30s)
         let charts = {};
         let singleChart = null;
         let refreshInterval = null;
 
+        // Load and apply branding
+        async function loadBranding() {
+            try {
+                const response = await fetch('/api/branding');
+                const branding = await response.json();
+
+                // Apply app name
+                if (branding.appName) {
+                    document.querySelector('header h1').textContent = branding.appName;
+                    document.getElementById('pageTitle').textContent = `${branding.appName} - Dashboard`;
+                }
+
+                // Apply tagline
+                if (branding.appTagline) {
+                    document.querySelector('header .subtitle').textContent = branding.appTagline;
+                }
+
+                // Apply primary color
+                if (branding.primaryColor) {
+                    document.documentElement.style.setProperty('--primary-color', branding.primaryColor);
+                }
+
+                // Apply logo - only if logoUrl is a valid non-empty string
+                const h1 = document.querySelector('header h1');
+                if (branding.logoUrl && typeof branding.logoUrl === 'string' && branding.logoUrl.trim() !== '' && branding.logoUrl !== 'null') {
+                    h1.innerHTML = `<img src="${branding.logoUrl}" alt="${branding.appName}" style="max-height: 40px; vertical-align: middle;" onerror="this.style.display='none'">`;
+                } else {
+                    // Keep text-only header when no logo is configured
+                    h1.textContent = branding.appName;
+                }
+
+                // Apply favicon
+                if (branding.faviconUrl) {
+                    document.getElementById('favicon').href = branding.faviconUrl;
+                }
+
+                // Apply footer text
+                if (branding.footerText) {
+                    document.querySelector('footer p').innerHTML = branding.footerText;
+                }
+            } catch (error) {
+                console.error('Error loading branding:', error);
+            }
+        }
+
+        // Load branding on page load
+        loadBranding();
+
+        // Helper function to convert hex to RGB
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 0, g: 123, b: 255 }; // Default to #007bff
+        }
+
+        // Initialize the page with credentials (from URL or localStorage)
         if (apiKey && appId) {
             document.getElementById('apiKey').value = apiKey;
             document.getElementById('appId').value = appId;
-            document.getElementById('authStatus').textContent = `Authenticated (${appId})`;
+            updateAuthUI();
             loadData();
             startAutoRefresh();
         } else if (apiKey || appId) {
             document.getElementById('apiKey').value = apiKey;
             document.getElementById('appId').value = appId;
-            document.getElementById('authStatus').textContent = 'Missing credentials';
+            updateAuthUI();
+        } else {
+            updateAuthUI();
         }
 
         function setCredentials() {
@@ -487,15 +879,56 @@
             appId = document.getElementById('appId').value;
 
             if (!apiKey || !appId) {
-                document.getElementById('authStatus').textContent = 'Both App ID and API Key required';
+                showError('Both App ID and API Key required');
                 return;
             }
 
+            // Clear all existing charts
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            if (singleChart) {
+                singleChart.destroy();
+                singleChart = null;
+            }
+
+            // Clear the view containers
+            document.getElementById('gridView').innerHTML = '<div class="loading">Loading metrics...</div>';
+            document.getElementById('listView').innerHTML = '';
+            document.getElementById('singleChartView').style.display = 'none';
+
             localStorage.setItem('apiKey', apiKey);
             localStorage.setItem('appId', appId);
-            document.getElementById('authStatus').textContent = `Authenticated (${appId})`;
+
+            // Update UI to show authenticated state
+            updateAuthUI();
+
             loadData();
             startAutoRefresh();
+        }
+
+        function updateAuthUI() {
+            if (apiKey && appId) {
+                // Hide login form, show authenticated status
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('authStatus').style.display = 'block';
+                document.getElementById('authAppId').textContent = appId;
+            } else {
+                // Show login form, hide authenticated status
+                document.getElementById('loginForm').style.display = 'flex';
+                document.getElementById('authStatus').style.display = 'none';
+            }
+        }
+
+        function toggleLoginForm() {
+            const loginForm = document.getElementById('loginForm');
+            if (loginForm.style.display === 'none') {
+                // Show login form
+                loginForm.style.display = 'flex';
+            } else {
+                // Hide login form
+                loginForm.style.display = 'none';
+            }
         }
 
         async function apiRequest(endpoint, options = {}) {
@@ -533,7 +966,10 @@
         async function loadData() {
             if (!apiKey || !appId) return;
 
+            const spinner = document.getElementById('loadingSpinner');
+
             try {
+                spinner.classList.add('active');
                 await loadStats();
 
                 if (currentView === 'grid') {
@@ -543,16 +979,22 @@
                 }
             } catch (error) {
                 console.error('Error loading data:', error);
+            } finally {
+                spinner.classList.remove('active');
             }
         }
 
         async function loadStats() {
-            const stats = await apiRequest('/api/stats');
+            const [stats, alerts] = await Promise.all([
+                apiRequest('/api/stats'),
+                apiRequest('/api/alerts').catch(() => [])
+            ]);
 
             document.getElementById('totalMetrics').textContent = stats.totalMetrics;
             document.getElementById('totalDataPoints').textContent = stats.totalDataPoints.toLocaleString();
             document.getElementById('dbSize').textContent = formatBytes(stats.databaseSize);
             document.getElementById('uptime').textContent = formatUptime(stats.uptime);
+            document.getElementById('totalAlerts').textContent = alerts.length;
         }
 
         async function loadGridView() {
@@ -568,11 +1010,21 @@
             Object.values(charts).forEach(chart => chart.destroy());
             charts = {};
 
-            // Load metrics data and alert states in parallel
-            const [metricsData, alertStates] = await Promise.all([
+            // Load metrics data, alert states, and alerts configuration in parallel
+            const [metricsData, alertStates, allAlerts] = await Promise.all([
                 Promise.all(metrics.map(m => apiRequest(`/api/metrics/${m.metric}?range=${currentRange}&limit=1000`))),
-                apiRequest('/api/alert-states').catch(() => ({}))
+                apiRequest('/api/alert-states').catch(() => ({})),
+                apiRequest('/api/alerts').catch(() => [])
             ]);
+
+            // Create a map of metric name to its alerts
+            const alertsByMetric = {};
+            allAlerts.forEach(alert => {
+                if (!alertsByMetric[alert.metric]) {
+                    alertsByMetric[alert.metric] = [];
+                }
+                alertsByMetric[alert.metric].push(alert);
+            });
 
             // Create chart cards
             gridView.innerHTML = metrics.map((m, i) => {
@@ -583,13 +1035,26 @@
                 const max = values.length > 0 ? Math.max(...values) : 0;
                 const avg = values.length > 0 ? (values.reduce((a, b) => a + b, 0) / values.length) : 0;
 
-                // Check if this metric is currently alerting
-                const isAlerting = alertStates[m.metric]?.isAlerting || false;
-                const alertClass = isAlerting ? 'chart-card-alerting' : '';
-                const alertBadge = isAlerting ? '<span class="alert-badge">🚨 ALERT</span>' : '';
+                // Check metric alert state
+                const alertState = alertStates[m.metric];
+                const state = alertState?.state || 'normal';
+
+                let alertClass = '';
+                let alertBadge = '';
+
+                if (state === 'breaching') {
+                    alertClass = 'chart-card-breaching';
+                    alertBadge = `<span class="alert-badge" style="background: #fbbf24;">⚠️ BREACHING (${alertState.consecutiveBreaches}/${alertState.enterThreshold})</span>`;
+                } else if (state === 'alerting') {
+                    alertClass = 'chart-card-alerting';
+                    alertBadge = '<span class="alert-badge">🚨 ALERT</span>';
+                } else if (state === 'recovering') {
+                    alertClass = 'chart-card-recovering';
+                    alertBadge = `<span class="alert-badge" style="background: #3b82f6;">🔵 RECOVERING (${alertState.consecutiveRecoveries}/${alertState.exitThreshold})</span>`;
+                }
 
                 return `
-                    <div class="chart-card ${alertClass}">
+                    <div class="chart-card ${alertClass}" onclick="showMetricDetail('${m.metric}')" style="cursor: pointer;">
                         <div class="chart-card-header">
                             <div class="chart-card-title">${m.metric} ${alertBadge}</div>
                             <div class="chart-card-stats">
@@ -622,7 +1087,8 @@
             setTimeout(() => {
                 metrics.forEach((m, i) => {
                     const data = metricsData[i].data;
-                    createChart(`chart-${i}`, m.metric, data);
+                    const metricAlerts = alertsByMetric[m.metric] || [];
+                    createChart(`chart-${i}`, m.metric, data, metricAlerts);
                 });
             }, 0);
         }
@@ -636,53 +1102,230 @@
                 return;
             }
 
-            listView.innerHTML = metrics.map(m => `
-                <div class="metric-card" onclick="viewSingleMetric('${m.metric}')">
-                    <div class="metric-name">${m.metric}</div>
-                    <div class="metric-info">
-                        ${m.count} data points<br>
-                        Last updated: ${formatTimestamp(m.last_updated)}
+            // Fetch alert states
+            const alertStates = await apiRequest('/api/alert-states').catch(() => ({}));
+
+            listView.innerHTML = metrics.map(m => {
+                // Check metric alert state
+                const alertState = alertStates[m.metric];
+                const state = alertState?.state || 'normal';
+
+                let cardClass = 'metric-card';
+                let alertBadge = '';
+
+                if (state === 'breaching') {
+                    cardClass += ' chart-card-breaching';
+                    alertBadge = `<span class="alert-badge" style="background: #fbbf24;">⚠️ BREACHING (${alertState.consecutiveBreaches}/${alertState.enterThreshold})</span>`;
+                } else if (state === 'alerting') {
+                    cardClass += ' chart-card-alerting';
+                    alertBadge = '<span class="alert-badge">🚨 ALERT</span>';
+                } else if (state === 'recovering') {
+                    cardClass += ' chart-card-recovering';
+                    alertBadge = `<span class="alert-badge" style="background: #3b82f6;">🔵 RECOVERING (${alertState.consecutiveRecoveries}/${alertState.exitThreshold})</span>`;
+                }
+
+                return `
+                    <div class="${cardClass}" onclick="viewSingleMetric('${m.metric}')">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <div class="metric-name">${m.metric}</div>
+                            ${alertBadge}
+                        </div>
+                        <div class="metric-info">
+                            ${m.count} data points<br>
+                            Last updated: ${formatTimestamp(m.last_updated)}
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
-        function createChart(canvasId, metricName, data) {
+        function createChart(canvasId, metricName, data, alerts = []) {
             const ctx = document.getElementById(canvasId).getContext('2d');
+
+            // Get primary color from CSS variable
+            const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#007bff';
+            const primaryColorRgb = hexToRgb(primaryColor);
+
+            // Convert data to time-based format {x: timestamp, y: value}
+            // Keep null values as null to show gaps in the chart
+            const timeData = data.map(d => ({
+                x: d.timestamp * 1000, // Convert seconds to milliseconds for JavaScript Date
+                y: d.value === null ? null : (parseFloat(d.value) || 0)
+            }));
+
+            // Calculate expected interval between points (use median of actual intervals)
+            const intervals = [];
+            for (let i = 1; i < timeData.length; i++) {
+                if (timeData[i].y !== null && timeData[i-1].y !== null) {
+                    intervals.push(timeData[i].x - timeData[i-1].x);
+                }
+            }
+            const expectedInterval = intervals.length > 0
+                ? intervals.sort((a, b) => a - b)[Math.floor(intervals.length / 2)]
+                : 60000; // Default 60 seconds
+
+            const datasets = [{
+                label: metricName,
+                data: timeData,
+                borderColor: primaryColor,
+                backgroundColor: `rgba(${primaryColorRgb.r}, ${primaryColorRgb.g}, ${primaryColorRgb.b}, 0.1)`,
+                tension: 0.4,
+                fill: true,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                pointBackgroundColor: primaryColor,
+                borderWidth: 2,
+                order: 1,
+                segment: {
+                    borderColor: ctx => {
+                        // Check if there's a gap before this segment
+                        const dataIndex = ctx.p1DataIndex;
+                        if (dataIndex > 0) {
+                            const curr = timeData[dataIndex];
+                            const prev = timeData[dataIndex - 1];
+                            if (curr.y !== null && prev.y !== null) {
+                                const gap = curr.x - prev.x;
+                                // If gap is more than 2 intervals, use dotted line
+                                if (gap > expectedInterval * 2.5) {
+                                    return 'rgba(156, 163, 175, 0.5)'; // Gray color for gaps
+                                }
+                            }
+                        }
+                        return primaryColor;
+                    },
+                    borderDash: ctx => {
+                        // Use dashed line for segments with gaps
+                        const dataIndex = ctx.p1DataIndex;
+                        if (dataIndex > 0) {
+                            const curr = timeData[dataIndex];
+                            const prev = timeData[dataIndex - 1];
+                            if (curr.y !== null && prev.y !== null) {
+                                const gap = curr.x - prev.x;
+                                if (gap > expectedInterval * 2.5) {
+                                    return [5, 5]; // Dotted line
+                                }
+                            }
+                        }
+                        return []; // Solid line
+                    },
+                    backgroundColor: ctx => {
+                        // No fill for segments with gaps
+                        const dataIndex = ctx.p1DataIndex;
+                        if (dataIndex > 0) {
+                            const curr = timeData[dataIndex];
+                            const prev = timeData[dataIndex - 1];
+                            if (curr.y !== null && prev.y !== null) {
+                                const gap = curr.x - prev.x;
+                                if (gap > expectedInterval * 2.5) {
+                                    return 'transparent'; // No fill for gaps
+                                }
+                            }
+                        }
+                        return `rgba(${primaryColorRgb.r}, ${primaryColorRgb.g}, ${primaryColorRgb.b}, 0.1)`;
+                    }
+                },
+                spanGaps: true
+            }];
+
+            // Calculate min/max from actual data for Y-axis scaling
+            const actualValues = timeData.filter(d => d.y !== null).map(d => d.y);
+            const dataMin = actualValues.length > 0 ? Math.min(...actualValues) : 0;
+            const dataMax = actualValues.length > 0 ? Math.max(...actualValues) : 100;
+            const dataRange = dataMax - dataMin;
+            const yPadding = dataRange * 0.1; // 10% padding
+
+            // Add threshold lines for each alert
+            alerts.forEach((alert, idx) => {
+                if (alert.enabled) {
+                    const thresholdValue = parseFloat(alert.threshold);
+                    // Create threshold data points matching the time range
+                    const thresholdData = timeData.map(d => ({
+                        x: d.x,
+                        y: thresholdValue
+                    }));
+
+                    datasets.push({
+                        label: `Alert: ${alert.condition} ${alert.threshold}`,
+                        data: thresholdData,
+                        borderColor: alert.isAlerting ? '#dc3545' : 'rgba(220, 53, 69, 0.5)',
+                        backgroundColor: 'transparent',
+                        borderWidth: alert.isAlerting ? 2 : 1,
+                        borderDash: alert.isAlerting ? [] : [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        order: 0
+                    });
+                }
+            });
 
             charts[canvasId] = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.map(d => new Date(d.timestamp).toLocaleTimeString()),
-                    datasets: [{
-                        label: metricName,
-                        data: data.map(d => parseFloat(d.value) || 0),
-                        borderColor: '#007bff',
-                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                        tension: 0.4,
-                        fill: true,
-                        pointRadius: 0,
-                        borderWidth: 2
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: true,
                     plugins: {
                         legend: {
-                            display: false
+                            display: alerts.length > 0,
+                            position: 'bottom',
+                            labels: {
+                                font: {
+                                    size: 10
+                                },
+                                filter: function(item) {
+                                    // Only show alert thresholds in legend
+                                    return item.text.startsWith('Alert:');
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label.startsWith('Alert:')) {
+                                        return context.dataset.label;
+                                    }
+                                    return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}`;
+                                }
+                            }
                         }
                     },
                     scales: {
                         x: {
+                            type: 'time',
                             display: true,
+                            time: {
+                                tooltipFormat: 'PPpp',
+                                displayFormats: {
+                                    millisecond: 'HH:mm:ss.SSS',
+                                    second: 'HH:mm:ss',
+                                    minute: 'HH:mm',
+                                    hour: 'HH:mm',
+                                    day: 'MMM dd',
+                                    week: 'MMM dd',
+                                    month: 'MMM yyyy',
+                                    quarter: 'MMM yyyy',
+                                    year: 'yyyy'
+                                }
+                            },
                             ticks: {
-                                maxTicksLimit: 6,
-                                maxRotation: 0
+                                display: true,
+                                maxTicksLimit: 8,
+                                maxRotation: 0,
+                                autoSkip: true
+                            },
+                            grid: {
+                                display: true,
+                                drawOnChartArea: true
+                            },
+                            title: {
+                                display: false
                             }
                         },
                         y: {
-                            beginAtZero: true
+                            min: Math.max(0, dataMin - yPadding),
+                            max: dataMax + yPadding
                         }
                     }
                 }
@@ -690,10 +1333,40 @@
         }
 
         async function viewSingleMetric(metricName) {
-            const data = await apiRequest(`/api/metrics/${metricName}?range=${currentRange}&limit=1000`);
+            // Fetch metric data, alert states, and alerts in parallel
+            const [data, alertStates, allAlerts] = await Promise.all([
+                apiRequest(`/api/metrics/${metricName}?range=${currentRange}&limit=1000`),
+                apiRequest('/api/alert-states').catch(() => ({})),
+                apiRequest('/api/alerts').catch(() => [])
+            ]);
 
             document.getElementById('singleChartTitle').textContent = metricName;
             document.getElementById('singleChartView').style.display = 'block';
+
+            // Get alert state for this metric
+            const alertState = alertStates[metricName];
+            const state = alertState?.state || 'normal';
+
+            // Get alerts for this metric
+            const metricAlerts = allAlerts.filter(a => a.metric === metricName);
+
+            // Apply background color to container
+            const container = document.getElementById('singleChartContainer');
+            container.className = '';
+
+            let alertBadge = '';
+            if (state === 'breaching') {
+                container.classList.add('chart-card-breaching');
+                alertBadge = `<span class="alert-badge" style="background: #fbbf24;">⚠️ BREACHING (${alertState.consecutiveBreaches}/${alertState.enterThreshold})</span>`;
+            } else if (state === 'alerting') {
+                container.classList.add('chart-card-alerting');
+                alertBadge = '<span class="alert-badge">🚨 ALERT</span>';
+            } else if (state === 'recovering') {
+                container.classList.add('chart-card-recovering');
+                alertBadge = `<span class="alert-badge" style="background: #3b82f6;">🔵 RECOVERING (${alertState.consecutiveRecoveries}/${alertState.exitThreshold})</span>`;
+            }
+
+            document.getElementById('singleChartBadge').innerHTML = alertBadge;
 
             const ctx = document.getElementById('singleChart').getContext('2d');
 
@@ -701,37 +1374,179 @@
                 singleChart.destroy();
             }
 
+            const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#007bff';
+            const primaryColorRgb = hexToRgb(primaryColor);
+
+            // Convert data to time-based format
+            // Keep null values as null to show gaps in the chart
+            const timeData = data.data.map(d => ({
+                x: d.timestamp * 1000, // Convert seconds to milliseconds
+                y: d.value === null ? null : (parseFloat(d.value) || 0)
+            }));
+
+            // Calculate min/max from actual data for Y-axis scaling
+            const actualValues = timeData.filter(d => d.y !== null).map(d => d.y);
+            const dataMin = actualValues.length > 0 ? Math.min(...actualValues) : 0;
+            const dataMax = actualValues.length > 0 ? Math.max(...actualValues) : 100;
+            const dataRange = dataMax - dataMin;
+            const yPadding = dataRange * 0.1; // 10% padding
+
+            // Calculate expected interval between points (use median of actual intervals)
+            const intervals = [];
+            for (let i = 1; i < timeData.length; i++) {
+                if (timeData[i].y !== null && timeData[i-1].y !== null) {
+                    intervals.push(timeData[i].x - timeData[i-1].x);
+                }
+            }
+            const expectedInterval = intervals.length > 0
+                ? intervals.sort((a, b) => a - b)[Math.floor(intervals.length / 2)]
+                : 60000; // Default 60 seconds
+
+            const datasets = [{
+                label: metricName,
+                data: timeData,
+                borderColor: primaryColor,
+                backgroundColor: `rgba(${primaryColorRgb.r}, ${primaryColorRgb.g}, ${primaryColorRgb.b}, 0.1)`,
+                tension: 0.4,
+                fill: true,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                borderWidth: 2,
+                order: 1,
+                segment: {
+                    borderColor: ctx => {
+                        // Check if there's a gap before this segment
+                        const dataIndex = ctx.p1DataIndex;
+                        if (dataIndex > 0) {
+                            const curr = timeData[dataIndex];
+                            const prev = timeData[dataIndex - 1];
+                            if (curr.y !== null && prev.y !== null) {
+                                const gap = curr.x - prev.x;
+                                // If gap is more than 2 intervals, use dotted line
+                                if (gap > expectedInterval * 2.5) {
+                                    return 'rgba(156, 163, 175, 0.5)'; // Gray color for gaps
+                                }
+                            }
+                        }
+                        return primaryColor;
+                    },
+                    borderDash: ctx => {
+                        // Use dashed line for segments with gaps
+                        const dataIndex = ctx.p1DataIndex;
+                        if (dataIndex > 0) {
+                            const curr = timeData[dataIndex];
+                            const prev = timeData[dataIndex - 1];
+                            if (curr.y !== null && prev.y !== null) {
+                                const gap = curr.x - prev.x;
+                                if (gap > expectedInterval * 2.5) {
+                                    return [5, 5]; // Dotted line
+                                }
+                            }
+                        }
+                        return []; // Solid line
+                    },
+                    backgroundColor: ctx => {
+                        // No fill for segments with gaps
+                        const dataIndex = ctx.p1DataIndex;
+                        if (dataIndex > 0) {
+                            const curr = timeData[dataIndex];
+                            const prev = timeData[dataIndex - 1];
+                            if (curr.y !== null && prev.y !== null) {
+                                const gap = curr.x - prev.x;
+                                if (gap > expectedInterval * 2.5) {
+                                    return 'transparent'; // No fill for gaps
+                                }
+                            }
+                        }
+                        return `rgba(${primaryColorRgb.r}, ${primaryColorRgb.g}, ${primaryColorRgb.b}, 0.1)`;
+                    }
+                },
+                spanGaps: true
+            }];
+
+            // Add threshold lines for each alert
+            metricAlerts.forEach((alert, idx) => {
+                if (alert.enabled) {
+                    const thresholdValue = parseFloat(alert.threshold);
+                    const thresholdData = timeData.map(d => ({
+                        x: d.x,
+                        y: thresholdValue
+                    }));
+
+                    datasets.push({
+                        label: `Alert: ${alert.condition} ${alert.threshold}`,
+                        data: thresholdData,
+                        borderColor: alert.isAlerting ? '#dc3545' : 'rgba(220, 53, 69, 0.5)',
+                        backgroundColor: 'transparent',
+                        borderWidth: alert.isAlerting ? 2 : 1,
+                        borderDash: alert.isAlerting ? [] : [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        order: 0
+                    });
+                }
+            });
+
             singleChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.data.map(d => new Date(d.timestamp).toLocaleString()),
-                    datasets: [{
-                        label: metricName,
-                        data: data.data.map(d => parseFloat(d.value) || 0),
-                        borderColor: '#007bff',
-                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                        tension: 0.4,
-                        fill: true
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: true,
                     plugins: {
                         legend: {
-                            display: false
+                            display: metricAlerts.length > 0,
+                            position: 'bottom',
+                            labels: {
+                                font: {
+                                    size: 10
+                                },
+                                filter: function(item) {
+                                    // Only show alert thresholds in legend
+                                    return item.text.startsWith('Alert:');
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label.startsWith('Alert:')) {
+                                        return context.dataset.label;
+                                    }
+                                    return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}`;
+                                }
+                            }
                         }
                     },
                     scales: {
                         x: {
-                            display: true,
+                            type: 'time',
+                            time: {
+                                tooltipFormat: 'PPpp',
+                                displayFormats: {
+                                    millisecond: 'HH:mm:ss.SSS',
+                                    second: 'HH:mm:ss',
+                                    minute: 'HH:mm',
+                                    hour: 'HH:mm',
+                                    day: 'MMM dd',
+                                    week: 'MMM dd',
+                                    month: 'MMM yyyy',
+                                    quarter: 'MMM yyyy',
+                                    year: 'yyyy'
+                                }
+                            },
                             ticks: {
+                                maxTicksLimit: 10,
                                 maxRotation: 45,
-                                minRotation: 45
+                                minRotation: 0,
+                                autoSkip: true
                             }
                         },
                         y: {
-                            beginAtZero: true
+                            min: Math.max(0, dataMin - yPadding),
+                            max: dataMax + yPadding
                         }
                     }
                 }
@@ -772,7 +1587,8 @@
             currentRange = range;
 
             // Update button states
-            document.querySelectorAll('.time-range-controls button').forEach(btn => {
+            const timeRangeControls = document.querySelectorAll('.time-range-controls')[0];
+            timeRangeControls.querySelectorAll('button').forEach(btn => {
                 btn.classList.remove('active');
             });
             event.target.classList.add('active');
@@ -783,16 +1599,51 @@
             }
         }
 
+        function changeDataInterval(seconds) {
+            currentDataInterval = seconds;
+
+            // Update button states
+            const intervalControls = document.querySelectorAll('.time-range-controls')[1];
+            intervalControls.querySelectorAll('button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Reload charts with new interval
+            if (currentView === 'grid') {
+                loadGridView();
+            }
+        }
+
+        function changeRefreshRate(seconds) {
+            currentRefreshRate = seconds;
+
+            // Update button states
+            const refreshControls = document.querySelectorAll('.time-range-controls')[2];
+            refreshControls.querySelectorAll('button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Restart auto-refresh with new interval
+            startAutoRefresh();
+        }
+
         function startAutoRefresh() {
             if (refreshInterval) {
                 clearInterval(refreshInterval);
+            }
+
+            if (currentRefreshRate === 0) {
+                // Refresh disabled
+                return;
             }
 
             refreshInterval = setInterval(() => {
                 if (apiKey && appId) {
                     loadData();
                 }
-            }, 30000); // Refresh every 30 seconds
+            }, currentRefreshRate * 1000); // Convert seconds to milliseconds
         }
 
         function formatBytes(bytes) {
@@ -824,6 +1675,296 @@
 
             return date.toLocaleDateString();
         }
+
+        // Detail view functions
+        async function showMetricDetail(metricName) {
+            const modal = document.getElementById('detailModal');
+            modal.classList.add('active');
+
+            document.getElementById('detailMetricName').textContent = metricName;
+
+            // Fetch detailed data
+            try {
+                const details = await apiRequest(`/api/metrics/${metricName}/details`);
+                const alertStates = await apiRequest('/api/alert-states');
+
+                renderDetailView(details, alertStates[metricName]);
+            } catch (error) {
+                console.error('Error loading metric details:', error);
+            }
+        }
+
+        function renderDetailView(details, currentState) {
+            // Render current state
+            const stateDiv = document.getElementById('detailCurrentState');
+            if (currentState) {
+                let stateClass = '';
+                let stateText = '';
+
+                switch (currentState.state) {
+                    case 'breaching':
+                        stateClass = 'stat-box' + ' ' + 'chart-card-breaching';
+                        stateText = `⚠️ BREACHING (${currentState.consecutiveBreaches}/${currentState.enterThreshold})`;
+                        break;
+                    case 'alerting':
+                        stateClass = 'stat-box' + ' ' + 'chart-card-alerting';
+                        stateText = '🚨 ALERT ACTIVE';
+                        break;
+                    case 'recovering':
+                        stateClass = 'stat-box' + ' ' + 'chart-card-recovering';
+                        stateText = `🔵 RECOVERING (${currentState.consecutiveRecoveries}/${currentState.exitThreshold})`;
+                        break;
+                    default:
+                        stateClass = 'stat-box';
+                        stateText = '✅ NORMAL';
+                }
+
+                // Determine aggregation type badge
+                const aggType = details.aggregationType || 'avg';
+                const aggBadge = aggType === 'sum' ? '∑ SUM' : (aggType === 'max' ? '↑ MAX' : '⌀ AVG');
+                const aggColor = aggType === 'sum' ? '#3b82f6' : (aggType === 'max' ? '#dc3545' : '#6c757d');
+
+                stateDiv.innerHTML = `
+                    <div class="${stateClass}" style="padding: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <div style="font-size: 1.2rem; font-weight: 600;">${stateText}</div>
+                            <div style="background: ${aggColor}; color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">
+                                ${aggBadge}
+                            </div>
+                        </div>
+                        <div style="color: #666;">
+                            Threshold: ${currentState.condition} ${currentState.threshold}<br>
+                            Consecutive Breaches: ${currentState.consecutiveBreaches}<br>
+                            Consecutive Recoveries: ${currentState.consecutiveRecoveries}<br>
+                            <span style="color: ${aggColor}; font-size: 0.85rem; margin-top: 0.5rem; display: inline-block;">
+                                Aggregation: ${aggType.toUpperCase()} (used for 7d/30d views)
+                            </span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Determine aggregation type badge for no-alert state
+                const aggType = details.aggregationType || 'avg';
+                const aggBadge = aggType === 'sum' ? '∑ SUM' : (aggType === 'max' ? '↑ MAX' : '⌀ AVG');
+                const aggColor = aggType === 'sum' ? '#3b82f6' : (aggType === 'max' ? '#dc3545' : '#6c757d');
+
+                stateDiv.innerHTML = `
+                    <div class="stat-box" style="padding: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div class="stat-box-value">✅ NORMAL</div>
+                                <div class="stat-box-label">No alerts configured</div>
+                            </div>
+                            <div style="background: ${aggColor}; color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">
+                                ${aggBadge}
+                            </div>
+                        </div>
+                        <div style="color: ${aggColor}; font-size: 0.85rem; margin-top: 0.5rem;">
+                            Aggregation: ${aggType.toUpperCase()} (used for 7d/30d views)
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Render alert configuration
+            const alertConfigDiv = document.getElementById('detailAlertConfig');
+            if (details.alerts && details.alerts.length > 0) {
+                alertConfigDiv.innerHTML = details.alerts.map(alert => `
+                    <div class="stat-box" style="margin-bottom: 1rem;">
+                        <div style="font-weight: 600; margin-bottom: 0.5rem;">Alert #${alert.id}</div>
+                        <div style="color: #666;">
+                            <strong>Condition:</strong> ${alert.metric} ${alert.condition} ${alert.threshold}<br>
+                            <strong>Enter After:</strong> ${alert.enterThreshold} consecutive breaches<br>
+                            <strong>Exit After:</strong> ${alert.exitThreshold} consecutive recoveries<br>
+                            <strong>Webhook Frequency:</strong> Every ${alert.webhookFrequencyMinutes} minutes<br>
+                            <strong>Status:</strong> ${alert.enabled ? '✅ Enabled' : '❌ Disabled'}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                alertConfigDiv.innerHTML = '<p style="color: #666;">No alerts configured for this metric.</p>';
+            }
+
+            // Render webhook stats
+            const webhookStatsDiv = document.getElementById('detailWebhookStats');
+            if (details.webhookStats.totalCalls > 0) {
+                webhookStatsDiv.innerHTML = `
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-box-label">Total Calls</div>
+                            <div class="stat-box-value">${details.webhookStats.totalCalls}</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-box-label">Successful</div>
+                            <div class="stat-box-value" style="color: #28a745;">${details.webhookStats.successfulCalls}</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-box-label">Failed</div>
+                            <div class="stat-box-value" style="color: #dc3545;">${details.webhookStats.failedCalls}</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-box-label">Success Rate</div>
+                            <div class="stat-box-value">${details.webhookStats.successRate}%</div>
+                        </div>
+                    </div>
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-box-label">Entered</div>
+                            <div class="stat-box-value">${details.webhookStats.callsByState.entered}</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-box-label">Active</div>
+                            <div class="stat-box-value">${details.webhookStats.callsByState.active}</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-box-label">Recovered</div>
+                            <div class="stat-box-value">${details.webhookStats.callsByState.recovered}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                webhookStatsDiv.innerHTML = '<p style="color: #666;">No webhook calls yet.</p>';
+            }
+
+            // Render webhook history
+            const webhookHistoryDiv = document.getElementById('detailWebhookHistory');
+            if (details.webhookHistory && details.webhookHistory.length > 0) {
+                webhookHistoryDiv.innerHTML = `
+                    <table class="webhook-history-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>State</th>
+                                <th>Webhook URL</th>
+                                <th>Status</th>
+                                <th>Status Code</th>
+                                <th>Error</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${details.webhookHistory.map(call => `
+                                <tr>
+                                    <td>${new Date(call.timestamp * 1000).toLocaleString()}</td>
+                                    <td><span class="state-badge state-${call.state}">${call.state.toUpperCase()}</span></td>
+                                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${call.webhookUrl}">${call.webhookUrl}</td>
+                                    <td><span class="status-badge ${call.success ? 'status-success' : 'status-failed'}">${call.success ? '✓ Success' : '✗ Failed'}</span></td>
+                                    <td>${call.statusCode || 'N/A'}</td>
+                                    <td style="color: #dc3545; font-size: 0.85rem;">${call.errorMessage || '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } else {
+                webhookHistoryDiv.innerHTML = '<p style="color: #666;">No webhook call history.</p>';
+            }
+        }
+
+        function closeDetailView() {
+            document.getElementById('detailModal').classList.remove('active');
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeDetailView();
+            }
+        });
+
+        // All Alerts view functions
+        async function showAllAlerts() {
+            const modal = document.getElementById('alertsModal');
+            modal.classList.add('active');
+
+            try {
+                const [alerts, alertStates] = await Promise.all([
+                    apiRequest('/api/alerts'),
+                    apiRequest('/api/alert-states').catch(() => ({}))
+                ]);
+
+                renderAllAlerts(alerts, alertStates);
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+            }
+        }
+
+        function renderAllAlerts(alerts, alertStates) {
+            const listDiv = document.getElementById('allAlertsList');
+
+            if (alerts.length === 0) {
+                listDiv.innerHTML = '<p style="color: #666; text-align: center; padding: 2rem;">No alerts configured yet.</p>';
+                return;
+            }
+
+            // Group alerts by metric
+            const alertsByMetric = {};
+            alerts.forEach(alert => {
+                if (!alertsByMetric[alert.metric]) {
+                    alertsByMetric[alert.metric] = [];
+                }
+                alertsByMetric[alert.metric].push(alert);
+            });
+
+            listDiv.innerHTML = Object.keys(alertsByMetric).map(metric => {
+                const metricAlerts = alertsByMetric[metric];
+                const state = alertStates[metric];
+
+                let stateClass = '';
+                let stateBadge = '';
+
+                if (state) {
+                    switch (state.state) {
+                        case 'breaching':
+                            stateClass = 'chart-card-breaching';
+                            stateBadge = `<span class="alert-badge" style="background: #fbbf24;">⚠️ BREACHING (${state.consecutiveBreaches}/${state.enterThreshold})</span>`;
+                            break;
+                        case 'alerting':
+                            stateClass = 'chart-card-alerting';
+                            stateBadge = '<span class="alert-badge">🚨 ALERT</span>';
+                            break;
+                        case 'recovering':
+                            stateClass = 'chart-card-recovering';
+                            stateBadge = `<span class="alert-badge" style="background: #3b82f6;">🔵 RECOVERING (${state.consecutiveRecoveries}/${state.exitThreshold})</span>`;
+                            break;
+                    }
+                }
+
+                return `
+                    <div class="stat-box ${stateClass}" style="margin-bottom: 1.5rem; padding: 1.5rem; cursor: pointer;" onclick="showMetricDetail('${metric}')">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h3 style="margin: 0;">${metric}</h3>
+                            ${stateBadge}
+                        </div>
+                        ${metricAlerts.map(alert => `
+                            <div style="background: white; padding: 1rem; border-radius: 4px; margin-top: 0.5rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <strong>Alert #${alert.id}</strong>
+                                    <span class="status-badge ${alert.enabled ? 'status-success' : 'status-failed'}">${alert.enabled ? '✓ Enabled' : '✗ Disabled'}</span>
+                                </div>
+                                <div style="color: #666; font-size: 0.9rem;">
+                                    <strong>Condition:</strong> ${alert.metric} ${alert.condition} ${alert.threshold}<br>
+                                    <strong>Enter:</strong> ${alert.enterThreshold} consecutive breaches
+                                    <strong>Exit:</strong> ${alert.exitThreshold} consecutive recoveries<br>
+                                    <strong>Webhook Frequency:</strong> Every ${alert.webhookFrequencyMinutes} minutes<br>
+                                    ${alert.isAlerting ? '<strong style="color: #dc3545;">Currently Alerting!</strong>' : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function closeAlertsModal() {
+            document.getElementById('alertsModal').classList.remove('active');
+        }
+
+        // Close alerts modal when clicking outside
+        document.getElementById('alertsModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAlertsModal();
+            }
+        });
     </script>
 </body>
 </html>

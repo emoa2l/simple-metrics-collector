@@ -11,6 +11,16 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const MASTER_KEY = process.env.MASTER_KEY || 'master-key-change-me';
 
+// White-label / Branding configuration
+const BRANDING = {
+  appName: process.env.APP_NAME || 'Metric Collector',
+  appTagline: process.env.APP_TAGLINE || 'Simple Metrics Dashboard',
+  primaryColor: process.env.PRIMARY_COLOR || '#007bff',
+  logoUrl: process.env.LOGO_URL || null,
+  faviconUrl: process.env.FAVICON_URL || null,
+  footerText: process.env.FOOTER_TEXT || null
+};
+
 // Initialize Sequelize with support for multiple databases
 // DATABASE_URL format examples:
 //   sqlite://./data/metrics.db (default)
@@ -158,9 +168,86 @@ const Alert = sequelize.define('Alert', {
     type: DataTypes.BIGINT,
     allowNull: true,
     comment: 'Timestamp when webhook was last called'
+  },
+  treatMissingAsBreach: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    comment: 'Whether missing data points should be treated as breaches'
+  },
+  expectedIntervalSeconds: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Expected interval between data points in seconds (for missing data detection)'
+  },
+  lastDataTimestamp: {
+    type: DataTypes.BIGINT,
+    allowNull: true,
+    comment: 'Timestamp of last received data point'
   }
 }, {
   tableName: 'alerts'
+});
+
+// Define WebhookCallHistory model
+const WebhookCallHistory = sequelize.define('WebhookCallHistory', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  appId: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    index: true
+  },
+  metric: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    index: true
+  },
+  alertId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    index: true
+  },
+  webhookId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  webhookUrl: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  state: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    comment: 'entered, active, or recovered'
+  },
+  success: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false
+  },
+  statusCode: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  errorMessage: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  timestamp: {
+    type: DataTypes.BIGINT,
+    allowNull: false,
+    index: true
+  }
+}, {
+  tableName: 'webhook_call_history',
+  indexes: [
+    {
+      fields: ['appId', 'metric']
+    }
+  ]
 });
 
 // Define AwsConfig model
@@ -220,6 +307,12 @@ const WebhookConfig = sequelize.define('WebhookConfig', {
   enabled: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  format: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'generic',
+    comment: 'Webhook payload format: generic or slack'
   }
 }, {
   tableName: 'webhook_configs'
@@ -230,7 +323,7 @@ const WebhookConfig = sequelize.define('WebhookConfig', {
   try {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
-    await sequelize.sync();
+    await sequelize.sync({ alter: true });
     console.log('Database synced successfully.');
   } catch (error) {
     console.error('Unable to connect to the database:', error);
@@ -304,6 +397,34 @@ async function getAwsClients(appId) {
   };
 }
 
+// Helper function to determine aggregation type based on metric name
+function getAggregationType(metricName) {
+  const name = metricName.toLowerCase();
+
+  // SUM aggregation for rates and throughput metrics
+  if (name.includes('_rate') ||
+      name.includes('_per_sec') ||
+      name.includes('_per_min') ||
+      name.includes('requests') ||
+      name.includes('count') ||
+      name.includes('total')) {
+    return 'sum';
+  }
+
+  // MAX aggregation for usage and capacity metrics
+  if (name.includes('usage') ||
+      name.includes('cpu') ||
+      name.includes('memory') ||
+      name.includes('mem') ||
+      name.includes('disk') ||
+      name.includes('load')) {
+    return 'max';
+  }
+
+  // AVG for everything else (latency, response times, etc.)
+  return 'avg';
+}
+
 // Helper function to check if value meets alert condition
 function checkAlertCondition(value, condition, threshold) {
   const numValue = parseFloat(value);
@@ -331,25 +452,190 @@ function checkAlertCondition(value, condition, threshold) {
   }
 }
 
-// Helper function to call webhook
-async function callWebhook(url, payload) {
+// Helper function to format payload for different webhook types
+function formatWebhookPayload(payload, format) {
+  if (format === 'discord') {
+    const { appId, alert, value, state, consecutiveBreaches, consecutiveRecoveries, triggeredAt } = payload;
+
+    // Determine emoji and color based on state
+    let emoji = '📊';
+    let color = 3066993; // green (decimal)
+    let stateText = state.toUpperCase();
+
+    if (state === 'entered') {
+      emoji = '🚨';
+      color = 15158332; // red
+      stateText = 'ALERT TRIGGERED';
+    } else if (state === 'active') {
+      emoji = '⚠️';
+      color = 16776960; // yellow
+      stateText = 'STILL ALERTING';
+    } else if (state === 'recovered') {
+      emoji = '✅';
+      color = 3066993; // green
+      stateText = 'RECOVERED';
+    }
+
+    const fields = [
+      {
+        name: 'Metric',
+        value: alert.metric,
+        inline: true
+      },
+      {
+        name: 'Condition',
+        value: `${alert.condition} ${alert.threshold}`,
+        inline: true
+      },
+      {
+        name: 'Current Value',
+        value: value.toString(),
+        inline: true
+      },
+      {
+        name: 'App ID',
+        value: appId,
+        inline: true
+      }
+    ];
+
+    if (consecutiveBreaches) {
+      fields.push({
+        name: 'Consecutive Breaches',
+        value: consecutiveBreaches.toString(),
+        inline: true
+      });
+    }
+
+    if (consecutiveRecoveries) {
+      fields.push({
+        name: 'Consecutive Recoveries',
+        value: consecutiveRecoveries.toString(),
+        inline: true
+      });
+    }
+
+    return {
+      embeds: [{
+        title: `${emoji} ${stateText}`,
+        color: color,
+        fields: fields,
+        footer: {
+          text: 'Metric Collector'
+        },
+        timestamp: triggeredAt
+      }]
+    };
+  }
+
+  if (format === 'slack') {
+    const { appId, alert, value, state, consecutiveBreaches, consecutiveRecoveries, triggeredAt } = payload;
+
+    // Determine emoji and color based on state
+    let emoji = '📊';
+    let color = '#36a64f'; // green
+    let stateText = state.toUpperCase();
+
+    if (state === 'entered') {
+      emoji = '🚨';
+      color = 'danger'; // red
+      stateText = 'ALERT TRIGGERED';
+    } else if (state === 'active') {
+      emoji = '⚠️';
+      color = 'warning'; // yellow/orange
+      stateText = 'STILL ALERTING';
+    } else if (state === 'recovered') {
+      emoji = '✅';
+      color = 'good'; // green
+      stateText = 'RECOVERED';
+    }
+
+    // Build a simple text message
+    let message = `${emoji} *${stateText}*\n\n`;
+    message += `*Metric:* ${alert.metric}\n`;
+    message += `*Condition:* ${alert.condition} ${alert.threshold}\n`;
+    message += `*Current Value:* ${value}\n`;
+    message += `*App ID:* ${appId}\n`;
+
+    if (consecutiveBreaches) {
+      message += `*Consecutive Breaches:* ${consecutiveBreaches}\n`;
+    }
+
+    if (consecutiveRecoveries) {
+      message += `*Consecutive Recoveries:* ${consecutiveRecoveries}\n`;
+    }
+
+    return {
+      text: message,
+      attachments: [{
+        color: color,
+        footer: 'Metric Collector',
+        ts: Math.floor(new Date(triggeredAt).getTime() / 1000)
+      }]
+    };
+  }
+
+  // Default: return generic format (original payload)
+  return payload;
+}
+
+// Helper function to call webhook and record history
+async function callWebhook(url, payload, historyData = null, format = 'generic') {
   try {
+    // Format the payload based on webhook format
+    const formattedPayload = formatWebhookPayload(payload, format);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Metric-Collector/1.0'
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(formattedPayload),
       timeout: 5000
     });
 
-    return {
+    const result = {
       success: response.ok,
       status: response.status
     };
+
+    // Record history if provided
+    if (historyData) {
+      await WebhookCallHistory.create({
+        appId: historyData.appId,
+        metric: historyData.metric,
+        alertId: historyData.alertId,
+        webhookId: historyData.webhookId,
+        webhookUrl: url,
+        state: historyData.state,
+        success: response.ok,
+        statusCode: response.status,
+        errorMessage: null,
+        timestamp: Math.floor(Date.now() / 1000)
+      });
+    }
+
+    return result;
   } catch (error) {
     console.error('Error calling webhook:', error);
+
+    // Record failed call history if provided
+    if (historyData) {
+      await WebhookCallHistory.create({
+        appId: historyData.appId,
+        metric: historyData.metric,
+        alertId: historyData.alertId,
+        webhookId: historyData.webhookId,
+        webhookUrl: url,
+        state: historyData.state,
+        success: false,
+        statusCode: null,
+        errorMessage: error.message,
+        timestamp: Math.floor(Date.now() / 1000)
+      });
+    }
+
     return {
       success: false,
       error: error.message
@@ -391,20 +677,47 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
       const isBreaching = checkAlertCondition(value, alert.condition, alert.threshold);
       const now = timestamp;
 
-      if (isBreaching) {
-        // Increment consecutive breaches, reset recoveries
-        const newBreachCount = alert.consecutiveBreaches + 1;
+      // Update lastDataTimestamp for this alert (used for missing data detection)
+      await Alert.update(
+        { lastDataTimestamp: now },
+        { where: { id: alert.id } }
+      );
 
-        console.log(`Metric breaching: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, breach count: ${newBreachCount}/${alert.enterThreshold})`);
+      if (isBreaching) {
+        // Increment consecutive breaches
+        const newBreachCount = alert.consecutiveBreaches + 1;
 
         const updates = {
           consecutiveBreaches: newBreachCount,
-          consecutiveRecoveries: 0
+          consecutiveRecoveries: 0  // Only reset recoveries when breach threshold is met
         };
+
+        // If already alerting and recovering, only reset recovery if we hit breach threshold
+        // This prevents one bad value from immediately undoing recovery progress
+        if (alert.isAlerting && alert.consecutiveRecoveries > 0) {
+          if (newBreachCount < alert.enterThreshold) {
+            // Still recovering, just had a setback - don't fully reset recovery
+            console.log(`⚠️  Breach during recovery: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, breach ${newBreachCount}/${alert.enterThreshold}, had ${alert.consecutiveRecoveries} recoveries - recovery paused)`);
+            // Don't reset consecutiveRecoveries yet - let it compete with breaches
+            delete updates.consecutiveRecoveries; // Keep the recovery counter
+          } else {
+            // Multiple consecutive breaches - recovery failed, back to full alert
+            console.log(`🔴 Recovery failed: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, ${newBreachCount} consecutive breaches)`);
+            updates.consecutiveRecoveries = 0;
+          }
+        }
+        // Already alerting but not recovering - just still breaching
+        else if (alert.isAlerting) {
+          console.log(`🔴 Still breaching: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, alert active)`);
+        }
+        // Not yet alerting - count towards threshold
+        else {
+          console.log(`⚠️  Metric breaching: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, breach count: ${newBreachCount}/${alert.enterThreshold})`);
+        }
 
         // Check if we should enter alert state
         if (!alert.isAlerting && newBreachCount >= alert.enterThreshold) {
-          console.log(`⚠️  ENTERING ALERT STATE: ${metricName} (${newBreachCount} consecutive breaches)`);
+          console.log(`🚨 ENTERING ALERT STATE: ${metricName} (${newBreachCount} consecutive breaches reached threshold)`);
           updates.isAlerting = true;
           updates.lastTriggered = now;
 
@@ -427,8 +740,14 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
           };
 
           for (const webhook of webhooks) {
-            console.log(`Calling webhook: ${webhook.name} (${webhook.url})`);
-            await callWebhook(webhook.url, payload);
+            console.log(`📞 Calling webhook [${webhook.format || 'generic'}]: ${webhook.name} → state: entered`);
+            await callWebhook(webhook.url, payload, {
+              appId,
+              metric: metricName,
+              alertId: alert.id,
+              webhookId: webhook.id,
+              state: 'entered'
+            }, webhook.format || 'generic');
           }
         }
         // If already in alert state, check if we should call webhook again
@@ -457,7 +776,14 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
             };
 
             for (const webhook of webhooks) {
-              await callWebhook(webhook.url, payload);
+              console.log(`📞 Calling webhook [${webhook.format || 'generic'}]: ${webhook.name} → state: active (repeat notification)`);
+              await callWebhook(webhook.url, payload, {
+                appId,
+                metric: metricName,
+                alertId: alert.id,
+                webhookId: webhook.id,
+                state: 'active'
+              }, webhook.format || 'generic');
             }
           }
         }
@@ -468,18 +794,21 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
         // Not breaching - increment consecutive recoveries, reset breaches
         const newRecoveryCount = alert.consecutiveRecoveries + 1;
 
-        if (alert.isAlerting) {
-          console.log(`Metric recovering: ${metricName} (recovery count: ${newRecoveryCount}/${alert.exitThreshold})`);
-        }
-
         const updates = {
           consecutiveBreaches: 0,
           consecutiveRecoveries: newRecoveryCount
         };
 
+        // Show different messages based on state
+        if (alert.isAlerting) {
+          console.log(`🔵 Metric recovering: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value}, recovery count: ${newRecoveryCount}/${alert.exitThreshold})`);
+        } else {
+          console.log(`✅ Metric normal: ${metricName} ${alert.condition} ${alert.threshold} (value: ${value})`);
+        }
+
         // Check if we should exit alert state
         if (alert.isAlerting && newRecoveryCount >= alert.exitThreshold) {
-          console.log(`✅ EXITING ALERT STATE: ${metricName} (${newRecoveryCount} consecutive recoveries)`);
+          console.log(`✅ EXITING ALERT STATE: ${metricName} (${newRecoveryCount} consecutive recoveries reached threshold)`);
           updates.isAlerting = false;
 
           // Optionally call webhook when exiting alert state
@@ -499,8 +828,14 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
           };
 
           for (const webhook of webhooks) {
-            console.log(`Calling webhook (recovery): ${webhook.name} (${webhook.url})`);
-            await callWebhook(webhook.url, payload);
+            console.log(`📞 Calling webhook [${webhook.format || 'generic'}]: ${webhook.name} → state: recovered`);
+            await callWebhook(webhook.url, payload, {
+              appId,
+              metric: metricName,
+              alertId: alert.id,
+              webhookId: webhook.id,
+              state: 'recovered'
+            }, webhook.format || 'generic');
           }
         }
 
@@ -511,6 +846,135 @@ async function checkAndTriggerAlerts(appId, metricName, value, timestamp) {
     console.error('Error checking alerts:', error);
   }
 }
+
+// Background job to check for missing data on alerts configured to treat missing as breach
+async function checkForMissingData() {
+  try {
+    // Find all enabled alerts with treatMissingAsBreach enabled
+    const alerts = await Alert.findAll({
+      where: {
+        enabled: true,
+        treatMissingAsBreach: true
+      }
+    });
+
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const alert of alerts) {
+      // Skip if no data has ever been received
+      if (!alert.lastDataTimestamp) {
+        continue;
+      }
+
+      // Calculate how long since last data
+      const secondsSinceLastData = now - alert.lastDataTimestamp;
+      const missedIntervals = Math.floor(secondsSinceLastData / alert.expectedIntervalSeconds);
+
+      // If we've missed more than 2 intervals, treat as missing data (breach)
+      if (missedIntervals >= 2) {
+        console.log(`⚠️  Missing data detected: ${alert.metric} (last data: ${secondsSinceLastData}s ago, expected every ${alert.expectedIntervalSeconds}s)`);
+
+        // Get webhooks for this app
+        const webhooks = await WebhookConfig.findAll({
+          where: {
+            appId: alert.appId,
+            enabled: true
+          }
+        });
+
+        // Treat missing data as a breach
+        const newBreachCount = alert.consecutiveBreaches + 1;
+        const updates = {
+          consecutiveBreaches: newBreachCount,
+          consecutiveRecoveries: 0
+        };
+
+        // Check if we should enter alert state
+        if (!alert.isAlerting && newBreachCount >= alert.enterThreshold) {
+          console.log(`🔴 ENTERING ALERT STATE (Missing Data): ${alert.metric} (${newBreachCount} consecutive missing intervals)`);
+          updates.isAlerting = true;
+          updates.lastTriggered = now;
+
+          // Call webhooks immediately when entering alert state
+          const payload = {
+            appId: alert.appId,
+            alert: {
+              id: alert.id,
+              metric: alert.metric,
+              condition: alert.condition,
+              threshold: alert.threshold,
+              enterThreshold: alert.enterThreshold,
+              exitThreshold: alert.exitThreshold
+            },
+            value: 'NO DATA',
+            timestamp: now,
+            state: 'entered',
+            consecutiveBreaches: newBreachCount,
+            triggeredAt: new Date(now * 1000).toISOString(),
+            reason: 'missing_data'
+          };
+
+          for (const webhook of webhooks) {
+            console.log(`📞 Calling webhook [${webhook.format || 'generic'}]: ${webhook.name} → state: entered (missing data)`);
+            await callWebhook(webhook.url, payload, {
+              appId: alert.appId,
+              metric: alert.metric,
+              alertId: alert.id,
+              webhookId: webhook.id,
+              state: 'entered'
+            }, webhook.format || 'generic');
+          }
+        }
+        // If already in alert state, check if we should call webhook again
+        else if (alert.isAlerting) {
+          const timeSinceLastTrigger = now - (alert.lastTriggered || 0);
+          const webhookFrequencyMs = alert.webhookFrequencyMinutes * 60;
+
+          if (timeSinceLastTrigger >= webhookFrequencyMs) {
+            console.log(`📢 Webhook repeat (missing data): ${alert.metric} (still no data)`);
+            updates.lastTriggered = now;
+
+            const payload = {
+              appId: alert.appId,
+              alert: {
+                id: alert.id,
+                metric: alert.metric,
+                condition: alert.condition,
+                threshold: alert.threshold,
+                webhookFrequencyMinutes: alert.webhookFrequencyMinutes
+              },
+              value: 'NO DATA',
+              timestamp: now,
+              state: 'active',
+              consecutiveBreaches: newBreachCount,
+              triggeredAt: new Date(now * 1000).toISOString(),
+              reason: 'missing_data'
+            };
+
+            for (const webhook of webhooks) {
+              console.log(`📞 Calling webhook [${webhook.format || 'generic'}]: ${webhook.name} → state: active (repeat - missing data)`);
+              await callWebhook(webhook.url, payload, {
+                appId: alert.appId,
+                metric: alert.metric,
+                alertId: alert.id,
+                webhookId: webhook.id,
+                state: 'active'
+              }, webhook.format || 'generic');
+            }
+          }
+        }
+
+        await Alert.update(updates, { where: { id: alert.id } });
+      }
+    }
+  } catch (error) {
+    console.error('Error checking for missing data:', error);
+  }
+}
+
+// Run missing data check every 10 seconds
+setInterval(checkForMissingData, 10000);
+console.log('Missing data checker started (runs every 10 seconds)');
 
 // API Key authentication middleware
 const requireAuth = async (req, res, next) => {
@@ -592,6 +1056,11 @@ const requirePermission = (permission) => {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
+});
+
+// Branding configuration endpoint (public)
+app.get('/api/branding', (req, res) => {
+  res.json(BRANDING);
 });
 
 // API Key Management Endpoints (Master Key Only)
@@ -835,10 +1304,16 @@ app.post('/api/webhooks', requireAuth, requirePermission('w'), async (req, res) 
       return res.status(400).json({ error: 'X-App-Id header is required' });
     }
 
-    const { name, url } = req.body;
+    const { name, url, format } = req.body;
 
     if (!name || !url) {
       return res.status(400).json({ error: 'name and url are required' });
+    }
+
+    // Validate format if provided
+    const webhookFormat = format || 'generic';
+    if (!['generic', 'slack', 'discord'].includes(webhookFormat)) {
+      return res.status(400).json({ error: 'format must be "generic", "slack", or "discord"' });
     }
 
     // Validate URL format
@@ -852,6 +1327,7 @@ app.post('/api/webhooks', requireAuth, requirePermission('w'), async (req, res) 
       appId: req.auth.appId,
       name,
       url,
+      format: webhookFormat,
       enabled: true
     });
 
@@ -963,7 +1439,8 @@ app.post('/api/metrics', requireAuth, requirePermission('w'), async (req, res) =
       return res.status(400).json({ error: 'X-App-Id header is required' });
     }
 
-    const ts = timestamp || Date.now();
+    // Use 1-second granularity (convert milliseconds to seconds)
+    const ts = timestamp ? Math.floor(timestamp / 1000) : Math.floor(Date.now() / 1000);
 
     const newMetric = await Metric.create({
       appId: req.auth.appId,
@@ -1023,7 +1500,7 @@ app.get('/api/metrics', requireAuth, requirePermission('r'), async (req, res) =>
 app.get('/api/metrics/:name', requireAuth, requirePermission('r'), async (req, res) => {
   try {
     const { name } = req.params;
-    const { limit = 100, range } = req.query;
+    const { limit = 100, range, interval } = req.query;
 
     if (!req.auth.appId) {
       return res.status(400).json({ error: 'X-App-Id header is required' });
@@ -1035,30 +1512,130 @@ app.get('/api/metrics/:name', requireAuth, requirePermission('r'), async (req, r
     };
 
     // Handle time range (e.g., 24h, 7d, 30d)
+    let bucketSize = 0; // in seconds
     if (range) {
-      const now = Date.now();
-      let ms = 0;
+      const now = Math.floor(Date.now() / 1000); // Convert to seconds to match our timestamp storage
+      let seconds = 0;
 
-      if (range.endsWith('h')) ms = parseInt(range) * 60 * 60 * 1000;
-      else if (range.endsWith('d')) ms = parseInt(range) * 24 * 60 * 60 * 1000;
-      else if (range.endsWith('m')) ms = parseInt(range) * 60 * 1000;
+      if (range.endsWith('h')) seconds = parseInt(range) * 60 * 60;
+      else if (range.endsWith('d')) seconds = parseInt(range) * 24 * 60 * 60;
+      else if (range.endsWith('m')) seconds = parseInt(range) * 60;
 
-      if (ms > 0) {
-        where.timestamp = { [Op.gte]: now - ms };
+      if (seconds > 0) {
+        where.timestamp = { [Op.gte]: now - seconds };
+      }
+
+      // Set bucket size based on time range for aggressive aggregation
+      if (range === '1h') {
+        bucketSize = 30; // 30-second buckets (~120 points)
+      } else if (range === '24h') {
+        bucketSize = 120; // 2-minute buckets (~720 points)
+      } else if (range === '7d') {
+        bucketSize = 600; // 10-minute buckets (~1,008 points)
+      } else if (range === '30d') {
+        bucketSize = 3600; // 1-hour buckets (~720 points)
       }
     }
 
-    const data = await Metric.findAll({
-      where,
-      order: [['timestamp', 'ASC']],
-      limit: parseInt(limit),
-      raw: true
-    });
+    let data;
+    let aggregationType = null;
+
+    if (bucketSize > 0) {
+      // Determine aggregation type based on metric name
+      aggregationType = getAggregationType(name);
+
+      // Build aggregation function based on type
+      let aggFunction;
+      if (aggregationType === 'sum') {
+        aggFunction = 'SUM(CAST(value AS REAL))';
+      } else if (aggregationType === 'max') {
+        aggFunction = 'MAX(CAST(value AS REAL))';
+      } else {
+        aggFunction = 'AVG(CAST(value AS REAL))';
+      }
+
+      // Downsample to specified bucket size
+      // Group by timestamp/bucketSize and aggregate based on metric type
+      const rawData = await sequelize.query(
+        `SELECT
+          (timestamp / :bucketSize) * :bucketSize as timestamp,
+          ${aggFunction} as value,
+          MIN(CAST(value AS REAL)) as min_value,
+          MAX(CAST(value AS REAL)) as max_value,
+          COUNT(*) as sample_count
+         FROM metrics
+         WHERE appId = :appId AND metric = :metric AND timestamp >= :minTimestamp
+         GROUP BY timestamp / :bucketSize
+         ORDER BY timestamp ASC`,
+        {
+          replacements: {
+            appId: req.auth.appId,
+            metric: name,
+            minTimestamp: where.timestamp ? where.timestamp[Op.gte] : 0,
+            bucketSize: bucketSize
+          },
+          type: sequelize.QueryTypes.SELECT
+        }
+      );
+
+      // Format to match original data structure
+      data = rawData.map(row => ({
+        timestamp: row.timestamp,
+        value: row.value.toString(),
+        min_value: row.min_value,
+        max_value: row.max_value,
+        sample_count: row.sample_count
+      }));
+    } else {
+      // No downsampling - return raw data
+      data = await Metric.findAll({
+        where,
+        order: [['timestamp', 'ASC']],
+        limit: parseInt(limit),
+        raw: true
+      });
+    }
+
+    // Fill gaps if interval is specified
+    if (interval && parseInt(interval) > 0 && data.length > 0) {
+      const intervalSeconds = parseInt(interval);
+      const filledData = [];
+
+      // Get the time range
+      const firstTimestamp = data[0].timestamp;
+      const lastTimestamp = data[data.length - 1].timestamp;
+
+      // Create a map of existing data points for quick lookup
+      const dataMap = new Map();
+      data.forEach(d => {
+        dataMap.set(d.timestamp, d);
+      });
+
+      // Fill gaps from first to last timestamp at the specified interval
+      for (let ts = firstTimestamp; ts <= lastTimestamp; ts += intervalSeconds) {
+        if (dataMap.has(ts)) {
+          filledData.push(dataMap.get(ts));
+        } else {
+          // Add a null data point for missing interval
+          filledData.push({
+            timestamp: ts,
+            value: null,
+            appId: req.auth.appId,
+            metric: name
+          });
+        }
+      }
+
+      data = filledData;
+    }
 
     res.json({
       metric: name,
       appId: req.auth.appId,
       count: data.length,
+      downsampled: bucketSize > 0,
+      aggregationType: aggregationType, // sum, max, or avg (only for downsampled data)
+      intervalFilled: !!interval,
       data
     });
   } catch (error) {
@@ -1104,7 +1681,9 @@ app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) =>
       threshold,
       enterThreshold = 3,
       exitThreshold = 3,
-      webhookFrequencyMinutes = 5
+      webhookFrequencyMinutes = 5,
+      treatMissingAsBreach = false,
+      expectedIntervalSeconds = null
     } = req.body;
 
     if (!metric || !condition || !threshold) {
@@ -1129,6 +1708,11 @@ app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) =>
       return res.status(400).json({ error: 'webhookFrequencyMinutes must be at least 1' });
     }
 
+    // Validate treatMissingAsBreach configuration
+    if (treatMissingAsBreach && !expectedIntervalSeconds) {
+      return res.status(400).json({ error: 'expectedIntervalSeconds is required when treatMissingAsBreach is true' });
+    }
+
     const alert = await Alert.create({
       appId: req.auth.appId,
       metric,
@@ -1136,7 +1720,9 @@ app.post('/api/alerts', requireAuth, requirePermission('w'), async (req, res) =>
       threshold: String(threshold),
       enterThreshold,
       exitThreshold,
-      webhookFrequencyMinutes
+      webhookFrequencyMinutes,
+      treatMissingAsBreach,
+      expectedIntervalSeconds
     });
 
     res.json({
@@ -1177,24 +1763,44 @@ app.get('/api/alert-states', requireAuth, requirePermission('r'), async (req, re
       return res.status(400).json({ error: 'X-App-Id header is required' });
     }
 
-    const alertingMetrics = await Alert.findAll({
+    const allAlerts = await Alert.findAll({
       where: {
         appId: req.auth.appId,
-        isAlerting: true,
         enabled: true
       },
-      attributes: ['metric', 'condition', 'threshold', 'consecutiveBreaches', 'lastTriggered'],
+      attributes: ['metric', 'condition', 'threshold', 'consecutiveBreaches', 'consecutiveRecoveries', 'isAlerting', 'enterThreshold', 'exitThreshold', 'lastTriggered'],
       raw: true
     });
 
     // Return as a map of metric name to alert state
     const states = {};
-    for (const alert of alertingMetrics) {
+    for (const alert of allAlerts) {
+      // Determine the state based on breach/recovery counts
+      let state = 'normal';
+
+      if (alert.isAlerting) {
+        // Alert is active
+        if (alert.consecutiveRecoveries > 0 && alert.consecutiveRecoveries < alert.exitThreshold) {
+          state = 'recovering'; // Blue - in recovery but still alerting
+        } else {
+          state = 'alerting'; // Red - fully alerting
+        }
+      } else {
+        // Alert is not active
+        if (alert.consecutiveBreaches > 0 && alert.consecutiveBreaches < alert.enterThreshold) {
+          state = 'breaching'; // Yellow - breaching but not alerting yet
+        }
+      }
+
       states[alert.metric] = {
-        isAlerting: true,
+        state: state,
+        isAlerting: alert.isAlerting,
         condition: alert.condition,
         threshold: alert.threshold,
         consecutiveBreaches: alert.consecutiveBreaches,
+        consecutiveRecoveries: alert.consecutiveRecoveries,
+        enterThreshold: alert.enterThreshold,
+        exitThreshold: alert.exitThreshold,
         lastTriggered: alert.lastTriggered
       };
     }
@@ -1203,6 +1809,79 @@ app.get('/api/alert-states', requireAuth, requirePermission('r'), async (req, re
   } catch (error) {
     console.error('Error fetching alert states:', error);
     res.status(500).json({ error: 'Failed to fetch alert states' });
+  }
+});
+
+// GET /api/metrics/:name/details - Get detailed information about a specific metric
+app.get('/api/metrics/:name/details', requireAuth, requirePermission('r'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const metricName = req.params.name;
+
+    // Get alert configuration for this metric
+    const alerts = await Alert.findAll({
+      where: {
+        appId: req.auth.appId,
+        metric: metricName
+      },
+      raw: true
+    });
+
+    // Get webhook call history for this metric
+    const webhookHistory = await WebhookCallHistory.findAll({
+      where: {
+        appId: req.auth.appId,
+        metric: metricName
+      },
+      order: [['timestamp', 'DESC']],
+      limit: 100, // Last 100 webhook calls
+      raw: true
+    });
+
+    // Calculate webhook statistics
+    const totalCalls = webhookHistory.length;
+    const successfulCalls = webhookHistory.filter(h => h.success).length;
+    const failedCalls = webhookHistory.filter(h => !h.success).length;
+    const callsByState = {
+      entered: webhookHistory.filter(h => h.state === 'entered').length,
+      active: webhookHistory.filter(h => h.state === 'active').length,
+      recovered: webhookHistory.filter(h => h.state === 'recovered').length
+    };
+
+    // Get latest metric data
+    const latestMetrics = await Metric.findAll({
+      where: {
+        appId: req.auth.appId,
+        metric: metricName
+      },
+      order: [['timestamp', 'DESC']],
+      limit: 10,
+      raw: true
+    });
+
+    // Determine aggregation type for this metric
+    const aggregationType = getAggregationType(metricName);
+
+    res.json({
+      metric: metricName,
+      aggregationType: aggregationType, // sum, max, or avg
+      alerts: alerts,
+      webhookStats: {
+        totalCalls,
+        successfulCalls,
+        failedCalls,
+        successRate: totalCalls > 0 ? ((successfulCalls / totalCalls) * 100).toFixed(1) : 0,
+        callsByState
+      },
+      webhookHistory: webhookHistory,
+      latestData: latestMetrics
+    });
+  } catch (error) {
+    console.error('Error fetching metric details:', error);
+    res.status(500).json({ error: 'Failed to fetch metric details' });
   }
 });
 

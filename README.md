@@ -23,9 +23,20 @@ A lightweight metric collection and visualization tool for monitoring applicatio
 - **Simple API** - Just `POST {metric: "name", value: "123"}` to collect metrics
 - **Multi-Tenancy** - Partition metrics by App ID for multiple applications
 - **Role-Based API Keys** - Read-only, write-only, or read-write access control
+- **Smart Alerts** - Consecutive breach/recovery tracking prevents flapping
+- **Multi-State Visuals** - Yellow (breaching), Red (alerting), Blue (recovering)
+- **Webhook Integrations** - Slack & Discord formatted messages, generic JSON, webhook history tracking
+- **Missing Data Detection** - Configurable per-metric to detect crashes/downtime
+- **Intelligent Aggregation** - Auto-detects SUM/MAX/AVG based on metric name patterns
+- **Aggressive Data Bucketing** - Smart downsampling (30s/2m/10m/1h buckets) for clean charts
+- **Gap Detection** - Visualizes data gaps with dotted lines and no fill
+- **White-Label Support** - Customize branding, colors, logo, and app name
+- **Time-Based Charts** - Uniform x-axis with Chart.js time scale, 1-second granularity
+- **URL Authentication** - Share dashboard links with embedded credentials (`?appId=...&apiKey=...`)
+- **Interactive Demo** - `./demo.sh` with auto-login links and webhook support
 - **Multiple Database Support** - SQLite, PostgreSQL, or MySQL
-- **Auto-Generated Dashboards** - Grid view with all metrics displayed at once
-- **Alerts** - Set thresholds and get notified
+- **Auto-Generated Dashboards** - Grid view with all metrics, auto-refresh controls
+- **Detailed Metric Views** - Click any metric for alert config, webhook history, current state
 - **Easy Deployment** - Docker, npm, or standalone
 - **No Dependencies** - Works out of the box with SQLite
 - **Retention Policies** - Automatic cleanup of old data
@@ -169,14 +180,26 @@ Time ranges: `1h`, `24h`, `7d`, `30d`, or custom in minutes `60m`
 Before creating alerts, configure webhooks to receive notifications:
 
 ```bash
-# Create a webhook
+# Create a Slack webhook (auto-formats for Slack)
 curl -X POST http://localhost:3000/api/webhooks \
   -H "X-API-Key: mk_a1b2c3d4..." \
   -H "X-App-Id: my-app" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Slack Alerts",
-    "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+    "format": "slack"
+  }'
+
+# Create a generic webhook (raw JSON)
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Generic Webhook",
+    "url": "https://your-webhook-url.com/endpoint",
+    "format": "generic"
   }'
 
 # List all webhooks
@@ -197,12 +220,22 @@ curl -X DELETE http://localhost:3000/api/webhooks/1 \
   -H "X-App-Id: my-app"
 ```
 
+**Webhook Formats:**
+- `slack`: Auto-formatted rich messages for Slack with color-coded attachments
+- `discord`: Auto-formatted embeds for Discord with color-coded messages
+- `generic`: Raw JSON payload (default)
+
+**Slack/Discord webhooks** send rich formatted messages:
+- 🚨 Red for "ALERT TRIGGERED"
+- ⚠️ Yellow for "STILL ALERTING"
+- ✅ Green for "RECOVERED"
+
 ### Creating Alerts
 
 Create threshold-based alerts with smart breach detection:
 
 ```bash
-# Create an alert with default thresholds
+# Create a basic alert (default thresholds)
 curl -X POST http://localhost:3000/api/alerts \
   -H "X-API-Key: mk_a1b2c3d4..." \
   -H "X-App-Id: my-app" \
@@ -227,6 +260,19 @@ curl -X POST http://localhost:3000/api/alerts \
     "webhookFrequencyMinutes": 10
   }'
 
+# Create an alert with missing data detection (detects crashes)
+curl -X POST http://localhost:3000/api/alerts \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metric": "cpu_usage",
+    "condition": ">",
+    "threshold": "80",
+    "treatMissingAsBreach": true,
+    "expectedIntervalSeconds": 30
+  }'
+
 # List all alerts
 curl http://localhost:3000/api/alerts \
   -H "X-API-Key: mk_a1b2c3d4..." \
@@ -245,20 +291,95 @@ curl http://localhost:3000/api/alert-states \
 - `enterThreshold`: Number of consecutive breaches before entering alert state (default: 3)
 - `exitThreshold`: Number of consecutive recoveries before exiting alert state (default: 3)
 - `webhookFrequencyMinutes`: How often to call webhook while in alert state (default: 5)
+- `treatMissingAsBreach`: Whether missing data counts as a breach (default: false)
+- `expectedIntervalSeconds`: Expected interval between data points (required if treatMissingAsBreach=true)
 
-**How it works:**
+**How Smart Alerts Work:**
 1. Configure one or more webhooks for your app
 2. Create alerts with thresholds and conditions
-3. System tracks consecutive breaches
+3. System tracks **consecutive** breaches (prevents flapping)
 4. When consecutive breaches >= `enterThreshold`, alert enters active state
 5. While active, webhooks are called every `webhookFrequencyMinutes`
 6. When metric recovers for `exitThreshold` consecutive times, alert exits
-7. Dashboard shows alerting metrics with red background
+7. Dashboard shows multi-state visuals:
+   - ⚪ White: Normal
+   - 🟡 Yellow: Breaching (1-2 breaches, not yet alerting)
+   - 🔴 Red: Alerting (3+ consecutive breaches)
+   - 🔵 Blue: Recovering (1-2 recoveries while alerting)
+
+**Missing Data Detection:**
+- Enable `treatMissingAsBreach` for critical metrics (CPU, memory)
+- Background job checks every 10 seconds for missing data
+- If no data received for 2+ intervals, counts as breach
+- Useful for detecting crashed applications or network issues
+- Sends webhook with `"value": "NO DATA"` and `"reason": "missing_data"`
 
 **Webhook Payload States:**
-- `entered`: Alert just entered active state
-- `active`: Alert is ongoing (repeated notification)
-- `recovered`: Alert has cleared
+- `entered`: Alert just entered active state (3rd consecutive breach)
+- `active`: Alert is ongoing (repeated notification every N minutes)
+- `recovered`: Alert has cleared (3rd consecutive recovery)
+
+### Intelligent Metric Aggregation & Data Bucketing
+
+Metrics are automatically downsampled using **intelligent aggregation** based on metric name patterns and time range:
+
+**Bucket Sizes (for clean charts with ~120-1000 points):**
+- **1h view**: 30-second buckets (~120 points)
+- **24h view**: 2-minute buckets (~720 points)
+- **7d view**: 10-minute buckets (~1,008 points)
+- **30d view**: 1-hour buckets (~720 points)
+
+**Aggregation Types:**
+
+**SUM Aggregation** (for throughput/rate metrics):
+- `error_rate`, `requests_per_sec`, `*_rate`, `*_per_min`, `*count`, `*total`
+- Shows total throughput per time bucket
+- Example: `requests_per_sec` with 30s bucket → total requests per 30 seconds
+
+**MAX Aggregation** (for usage/capacity metrics):
+- `cpu_usage`, `memory_usage`, `*usage`, `*cpu`, `*memory`, `*disk`, `*load`
+- Shows peak usage per time bucket
+- Example: `cpu_usage` with 2m bucket → highest CPU spike per 2 minutes
+
+**AVG Aggregation** (for latency/performance metrics):
+- `response_time_ms`, `latency_ms`, everything else
+- Shows typical performance per time bucket
+- Example: `response_time_ms` with 10m bucket → average response time per 10 minutes
+
+The aggregation type is displayed in the metric detail modal with a color-coded badge (∑ SUM=blue, ↑ MAX=red, ⌀ AVG=gray).
+
+### Gap Detection & Visualization
+
+Data gaps (when metrics stop being sent) are automatically detected and visualized:
+
+- **Detection**: If the time between two data points is more than 2.5× the expected interval, it's marked as a gap
+- **Visualization**: Gaps are shown as gray dotted lines with no background fill
+- **Normal data**: Solid colored lines with shaded background
+- **Use case**: Easily spot service outages, network issues, or data collection problems
+
+Example: If you're sending metrics every 30 seconds and suddenly stop for 2 minutes, the chart will show a gray dotted line connecting the last point before the gap to the first point after recovery.
+
+### URL Authentication (Shareable Dashboard Links)
+
+Share dashboard access via URL parameters - perfect for demos, read-only viewers, or embedded dashboards:
+
+```
+http://your-server:3000?appId=my-app&apiKey=readonly-key-abc123
+```
+
+**Features:**
+- Auto-login on page load
+- Credentials saved to localStorage for convenience
+- Supports both `appId`/`apiKey` and `appid`/`apikey` (case-insensitive)
+- Clean authenticated UI shows App ID and masked API key
+- "Change Credentials" button to switch accounts
+
+**Demo script integration:**
+The `./demo.sh` script now outputs direct dashboard links with auto-login:
+```bash
+./demo.sh
+# Outputs: http://localhost:3001?appId=demo-app-1762369755&apiKey=abc123...
+```
 
 ## Configuration
 
@@ -279,6 +400,16 @@ DATABASE_URL=sqlite://./data/metrics.db                           # SQLite (defa
 
 # Retention
 RETENTION_DAYS=30  # Auto-delete data older than 30 days
+
+# White-Label Branding (Optional)
+APP_NAME=Acme Metrics
+APP_TAGLINE=Real-time Application & Infrastructure Monitoring
+PRIMARY_COLOR=#6366f1
+LOGO_URL=https://via.placeholder.com/150x40/6366f1/ffffff?text=ACME  # Optional - omit for text-only header
+FAVICON_URL=https://via.placeholder.com/32/6366f1/ffffff?text=A      # Optional
+FOOTER_TEXT=© 2025 Acme Corporation                                  # Optional
+
+# Note: All branding variables are optional. Missing/broken logo URLs are gracefully handled.
 ```
 
 ### Multi-Tenancy & API Keys
@@ -381,11 +512,65 @@ Get overall statistics
 
 ## Use Cases
 
+### Fleet Monitoring (Multiple Servers)
+
+**Option 1: Use hostname prefix in metric name** (all servers in same App ID)
+```bash
+# Server 1
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: production-cluster" \
+  -d '{"metric":"web01_cpu_usage","value":"45"}'
+
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: production-cluster" \
+  -d '{"metric":"web01_memory_usage","value":"60"}'
+
+# Server 2
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: production-cluster" \
+  -d '{"metric":"web02_cpu_usage","value":"52"}'
+
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: production-cluster" \
+  -d '{"metric":"web02_memory_usage","value":"75"}'
+
+# Dashboard shows: web01_cpu_usage, web01_memory_usage, web02_cpu_usage, web02_memory_usage
+```
+
+**Option 2: Use App ID as hostname** (each server gets its own App ID)
+```bash
+# Server 1
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: web01" \
+  -d '{"metric":"cpu_usage","value":"45"}'
+
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: web01" \
+  -d '{"metric":"memory_usage","value":"60"}'
+
+# Server 2
+curl -X POST http://your-server/api/metrics \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: web02" \
+  -d '{"metric":"cpu_usage","value":"52"}'
+
+# Each server has its own dashboard: ?appId=web01 or ?appId=web02
+```
+
+**Recommendation:** Use **Option 1** (hostname prefix) for unified fleet dashboard, or **Option 2** (App ID per server) for isolated server views.
+
 ### IoT Sensor Data
 ```bash
 # Temperature sensor
 curl -X POST http://your-server/api/metrics \
   -H "X-API-Key: $API_KEY" \
+  -H "X-App-Id: home-sensors" \
   -d '{"metric":"temperature","value":"22.5"}'
 ```
 
@@ -455,6 +640,40 @@ Works on any platform with Node.js:
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new)
 
+## Interactive Demo
+
+Run the included demo script to see the alert system in action:
+
+```bash
+# Basic demo (with placeholder webhook)
+./demo.sh
+
+# Demo with your Slack webhook
+./demo.sh https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+
+# Demo with Discord webhook
+./demo.sh https://discord.com/api/webhooks/YOUR/WEBHOOK/URL
+```
+
+The demo script:
+- Creates unique App ID and API keys for each run
+- **Outputs direct dashboard link with auto-login** - just click to watch!
+- Displays credentials upfront if you need to login manually
+- Demonstrates the full alert lifecycle with interactive pauses
+- Shows consecutive breach tracking (3 breaches → alert)
+- Shows recovery tracking (3 recoveries → cleared)
+- Sends varied metrics (CPU, memory, error_rate, response_time, requests_per_sec)
+- Auto-detects Slack/Discord URLs and formats webhooks accordingly
+- Waits 60 seconds or Enter key between steps
+
+**Example output:**
+```
+📊 Direct Dashboard Link (auto-login):
+   http://localhost:3001?appId=demo-app-1762369755&apiKey=abc123...
+
+   Just click the link - no manual login needed!
+```
+
 ## Development
 
 ```bash
@@ -470,13 +689,32 @@ npm test
 
 ## Roadmap
 
-- [ ] More visualization options (heatmaps, gauges)
-- [ ] Alert notifications (Slack, Discord, Email)
-- [ ] User authentication and multi-tenancy
+**Completed:**
+- [x] Smart alert thresholds with consecutive breach/recovery tracking
+- [x] Webhook notifications (Slack, Discord, generic JSON)
+- [x] Multi-tenancy with role-based API keys
+- [x] Intelligent metric aggregation (SUM/MAX/AVG based on metric names)
+- [x] Multi-state visual indicators (breaching/alerting/recovering)
+- [x] Missing data detection for crash detection
+- [x] White-label branding support
+- [x] Webhook call history tracking
+- [x] Interactive demo script
+
+**In Progress:**
 - [ ] Data export (CSV, JSON)
-- [ ] Metric aggregation (avg, min, max, sum)
+- [ ] More visualization options (heatmaps, gauges, sparklines)
 - [ ] Grafana data source plugin
-- [ ] Client libraries (Python, Go, Ruby)
+- [ ] Email webhook support
+- [ ] Alert templates
+- [ ] Metric annotations
+
+**Planned:**
+- [ ] Client libraries (Python, Go, Ruby, PHP)
+- [ ] Metric anomaly detection (ML-based)
+- [ ] Downtime tracking
+- [ ] SLA monitoring and reporting
+- [ ] API rate limiting
+- [ ] Metric retention policies per metric type
 
 ## Contributing
 
