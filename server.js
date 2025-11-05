@@ -837,10 +837,10 @@ app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════╗
 ║   Metric Collector Server                 ║
-║   Running on http://localhost:${PORT}       ║
+║   Running on http://localhost:${PORT}        ║
 ║                                           ║
-║   Master Key: ${MASTER_KEY.substring(0, 10)}...         ║
-║   Database: ${databaseUrl}                 ║
+║   Master Key: ${MASTER_KEY.substring(0, 10)}...               ║
+║   Database: ${databaseUrl}    ║
 ╚═══════════════════════════════════════════╝
 
 Quick Start:
