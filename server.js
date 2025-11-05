@@ -2,6 +2,9 @@ const express = require('express');
 const { Sequelize, DataTypes, Op } = require('sequelize');
 const path = require('path');
 const crypto = require('crypto');
+const { STSClient, AssumeRoleCommand } = require('@aws-sdk/client-sts');
+const { CloudWatchClient, PutMetricDataCommand } = require('@aws-sdk/client-cloudwatch');
+const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 require('dotenv').config();
 
 const app = express();
@@ -127,6 +130,40 @@ const Alert = sequelize.define('Alert', {
   tableName: 'alerts'
 });
 
+// Define AwsConfig model
+const AwsConfig = sequelize.define('AwsConfig', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  appId: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+    index: true
+  },
+  roleArn: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  region: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'us-east-1'
+  },
+  externalId: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  enabled: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
+  }
+}, {
+  tableName: 'aws_configs'
+});
+
 // Initialize database
 (async () => {
   try {
@@ -147,6 +184,63 @@ app.use(express.static('public'));
 // Helper function to generate API keys
 function generateApiKey() {
   return 'mk_' + crypto.randomBytes(32).toString('hex');
+}
+
+// Helper function to assume AWS role and get credentials
+async function assumeRole(appId) {
+  try {
+    const config = await AwsConfig.findOne({
+      where: { appId, enabled: true }
+    });
+
+    if (!config) {
+      throw new Error('AWS configuration not found for this app');
+    }
+
+    const stsClient = new STSClient({ region: config.region });
+
+    const params = {
+      RoleArn: config.roleArn,
+      RoleSessionName: `metric-collector-${appId}-${Date.now()}`,
+      DurationSeconds: 3600 // 1 hour
+    };
+
+    if (config.externalId) {
+      params.ExternalId = config.externalId;
+    }
+
+    const command = new AssumeRoleCommand(params);
+    const response = await stsClient.send(command);
+
+    return {
+      accessKeyId: response.Credentials.AccessKeyId,
+      secretAccessKey: response.Credentials.SecretAccessKey,
+      sessionToken: response.Credentials.SessionToken,
+      region: config.region
+    };
+  } catch (error) {
+    console.error('Error assuming AWS role:', error);
+    throw error;
+  }
+}
+
+// Helper function to get AWS clients with assumed role credentials
+async function getAwsClients(appId) {
+  const credentials = await assumeRole(appId);
+
+  const config = {
+    region: credentials.region,
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken
+    }
+  };
+
+  return {
+    cloudwatch: new CloudWatchClient(config),
+    sns: new SNSClient(config)
+  };
 }
 
 // API Key authentication middleware
@@ -336,6 +430,130 @@ app.patch('/api/keys/:id', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error updating API key:', error);
     res.status(500).json({ error: 'Failed to update API key' });
+  }
+});
+
+// AWS Configuration Endpoints
+
+// POST /api/aws/config - Configure AWS integration
+app.post('/api/aws/config', requireAuth, async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const { roleArn, region = 'us-east-1', externalId } = req.body;
+
+    if (!roleArn) {
+      return res.status(400).json({ error: 'roleArn is required' });
+    }
+
+    // Validate role ARN format
+    if (!roleArn.startsWith('arn:aws:iam::')) {
+      return res.status(400).json({ error: 'Invalid role ARN format' });
+    }
+
+    // Upsert (update if exists, create if not)
+    const [config, created] = await AwsConfig.upsert({
+      appId: req.auth.appId,
+      roleArn,
+      region,
+      externalId: externalId || null,
+      enabled: true
+    }, {
+      returning: true
+    });
+
+    res.json({
+      success: true,
+      created,
+      config: {
+        id: config.id,
+        appId: config.appId,
+        roleArn: config.roleArn,
+        region: config.region,
+        externalId: config.externalId ? '***' : null,
+        enabled: config.enabled
+      }
+    });
+  } catch (error) {
+    console.error('Error configuring AWS:', error);
+    res.status(500).json({ error: 'Failed to configure AWS integration' });
+  }
+});
+
+// GET /api/aws/config - Get AWS configuration
+app.get('/api/aws/config', requireAuth, requirePermission('r'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const config = await AwsConfig.findOne({
+      where: { appId: req.auth.appId }
+    });
+
+    if (!config) {
+      return res.status(404).json({ error: 'AWS configuration not found' });
+    }
+
+    res.json({
+      id: config.id,
+      appId: config.appId,
+      roleArn: config.roleArn,
+      region: config.region,
+      externalId: config.externalId ? '***' : null, // Masked for security
+      enabled: config.enabled
+    });
+  } catch (error) {
+    console.error('Error fetching AWS config:', error);
+    res.status(500).json({ error: 'Failed to fetch AWS configuration' });
+  }
+});
+
+// DELETE /api/aws/config - Delete AWS configuration
+app.delete('/api/aws/config', requireAuth, async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    const deleted = await AwsConfig.destroy({
+      where: { appId: req.auth.appId }
+    });
+
+    res.json({
+      success: true,
+      deleted: deleted > 0
+    });
+  } catch (error) {
+    console.error('Error deleting AWS config:', error);
+    res.status(500).json({ error: 'Failed to delete AWS configuration' });
+  }
+});
+
+// POST /api/aws/test - Test AWS assume role
+app.post('/api/aws/test', requireAuth, requirePermission('r'), async (req, res) => {
+  try {
+    if (!req.auth.appId) {
+      return res.status(400).json({ error: 'X-App-Id header is required' });
+    }
+
+    // Try to assume the role
+    const credentials = await assumeRole(req.auth.appId);
+
+    res.json({
+      success: true,
+      message: 'Successfully assumed AWS role',
+      region: credentials.region,
+      sessionExpires: new Date(Date.now() + 3600000).toISOString()
+    });
+  } catch (error) {
+    console.error('Error testing AWS role:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
