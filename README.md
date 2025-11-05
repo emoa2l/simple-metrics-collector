@@ -7,8 +7,10 @@ A lightweight, easy-to-deploy metric collection and visualization tool. No compl
 ## Features
 
 - **Simple API** - Just `POST {metric: "name", value: "123"}` to collect metrics
+- **Multi-Tenancy** - Partition metrics by App ID for multiple applications
+- **Role-Based API Keys** - Read-only, write-only, or read-write access control
 - **Multiple Database Support** - SQLite, PostgreSQL, or MySQL
-- **Clean Dashboard** - View metrics, charts, and trends
+- **Auto-Generated Dashboards** - Grid view with all metrics displayed at once
 - **Alerts** - Set thresholds and get notified
 - **Easy Deployment** - Docker, npm, or standalone
 - **No Dependencies** - Works out of the box with SQLite
@@ -25,7 +27,7 @@ cd metric-collector
 docker-compose up -d
 
 # Access dashboard at http://localhost:3000
-# Default API key: change-me-in-production
+# Default master key: master-key-change-me
 ```
 
 ### npm
@@ -60,18 +62,69 @@ npm start
 
 ## Usage
 
+### API Key Management
+
+First, create API keys using the master key:
+
+```bash
+# Create a read-write API key
+curl -X POST http://localhost:3000/api/keys \
+  -H "X-API-Key: master-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "rw", "name": "My App Key"}'
+
+# Response:
+# {
+#   "success": true,
+#   "id": 1,
+#   "key": "mk_a1b2c3d4...",
+#   "role": "rw",
+#   "name": "My App Key"
+# }
+
+# Create a read-only API key
+curl -X POST http://localhost:3000/api/keys \
+  -H "X-API-Key: master-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "r", "name": "Read Only Key"}'
+
+# Create a write-only API key (for sending metrics only)
+curl -X POST http://localhost:3000/api/keys \
+  -H "X-API-Key: master-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "w", "name": "Write Only Key"}'
+
+# List all API keys
+curl http://localhost:3000/api/keys \
+  -H "X-API-Key: master-key-change-me"
+
+# Disable an API key
+curl -X PATCH http://localhost:3000/api/keys/1 \
+  -H "X-API-Key: master-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+
+# Delete an API key
+curl -X DELETE http://localhost:3000/api/keys/1 \
+  -H "X-API-Key: master-key-change-me"
+```
+
 ### Sending Metrics
+
+**Important:** All metric operations require both `X-API-Key` and `X-App-Id` headers for multi-tenancy.
 
 ```bash
 # Basic metric
 curl -X POST http://localhost:3000/api/metrics \
-  -H "X-API-Key: your-api-key" \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
   -H "Content-Type: application/json" \
   -d '{"metric": "cpu_usage", "value": "75"}'
 
 # With custom timestamp
 curl -X POST http://localhost:3000/api/metrics \
-  -H "X-API-Key: your-api-key" \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
   -H "Content-Type: application/json" \
   -d '{"metric": "memory", "value": "4096", "timestamp": 1699999999000}'
 ```
@@ -81,15 +134,18 @@ curl -X POST http://localhost:3000/api/metrics \
 ```bash
 # List all metrics
 curl http://localhost:3000/api/metrics \
-  -H "X-API-Key: your-api-key"
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
 
 # Get specific metric data
 curl http://localhost:3000/api/metrics/cpu_usage \
-  -H "X-API-Key: your-api-key"
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
 
 # Get data for specific time range
 curl "http://localhost:3000/api/metrics/cpu_usage?range=24h&limit=100" \
-  -H "X-API-Key: your-api-key"
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app"
 ```
 
 Time ranges: `1h`, `24h`, `7d`, `30d`, or custom in minutes `60m`
@@ -98,7 +154,8 @@ Time ranges: `1h`, `24h`, `7d`, `30d`, or custom in minutes `60m`
 
 ```bash
 curl -X POST http://localhost:3000/api/alerts \
-  -H "X-API-Key: your-api-key" \
+  -H "X-API-Key: mk_a1b2c3d4..." \
+  -H "X-App-Id: my-app" \
   -H "Content-Type: application/json" \
   -d '{
     "metric": "cpu_usage",
@@ -118,7 +175,7 @@ PORT=3000
 NODE_ENV=production
 
 # Security
-API_KEY=your-secret-key-here
+MASTER_KEY=your-master-key-change-in-production  # For managing API keys
 
 # Database (choose one)
 DATABASE_URL=sqlite://./data/metrics.db                           # SQLite (default)
@@ -128,6 +185,23 @@ DATABASE_URL=sqlite://./data/metrics.db                           # SQLite (defa
 # Retention
 RETENTION_DAYS=30  # Auto-delete data older than 30 days
 ```
+
+### Multi-Tenancy & API Keys
+
+Metric Collector supports multi-tenancy through **App IDs**:
+
+- **App ID** (`X-App-Id` header): Partitions metrics by application
+- **Master Key**: Full access, can create/manage API keys, access all apps
+- **API Keys**: Three roles for granular access control
+  - `r` (read-only): Can view metrics and dashboards
+  - `w` (write-only): Can submit metrics only
+  - `rw` (read-write): Full access to metrics (default)
+
+**Example Workflow:**
+1. Use master key to create an API key for your app
+2. Send metrics with the API key + App ID
+3. View metrics in dashboard with API key + App ID
+4. Each App ID maintains isolated metrics
 
 ## Database Support
 
