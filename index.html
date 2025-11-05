@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metric Collector - Self-Hosted Metrics Dashboard</title>
+    <meta name="description" content="Simple, self-hosted metric aggregator and dashboard. No complex setup - just POST metrics and view dashboards. Lightweight alternative to Prometheus.">
+    <meta name="keywords" content="metrics, monitoring, self-hosted, dashboard, observability, prometheus alternative, metric collection, node.js monitoring">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Metric Collector - Self-Hosted Metrics Dashboard">
+    <meta property="og:description" content="Simple, self-hosted metric aggregator. No complex setup required.">
+    <meta property="og:type" content="website">
+
+    <style>
+        body {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            font-family: monospace;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1 { font-size: 1.8em; margin-bottom: 0.2em; }
+        h2 { font-size: 1.3em; margin-top: 2em; border-bottom: 1px solid #ccc; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; font-size: 0.9em; }
+        a { color: #0066cc; }
+        code { background: #f5f5f5; padding: 2px 4px; }
+    </style>
+</head>
+<body>
+    <h1>Metric Collector</h1>
+    <p>Simple, self-hosted metric aggregator and dashboard</p>
+
+    <p>
+        <a href="https://github.com/emoa2l/metric-collector">GitHub</a> |
+        <a href="https://github.com/emoa2l/metric-collector/blob/main/README.md">Documentation</a> |
+        <a href="https://github.com/emoa2l/metric-collector/blob/main/LICENSE">License</a>
+    </p>
+
+    <p>A lightweight metric collection and visualization tool. No Prometheus, no complex setup. Just send metrics via HTTP POST and view them in a dashboard.</p>
+
+    <h2>Quick Start</h2>
+    <pre>docker-compose up -d
+# Dashboard: http://localhost:3000</pre>
+
+    <h2>Features</h2>
+    <ul>
+        <li>Simple POST API for metric collection</li>
+        <li>Multi-tenancy with App IDs</li>
+        <li>Role-based API keys (read/write/admin)</li>
+        <li>Auto-generated dashboards</li>
+        <li>Threshold alerts with SNS</li>
+        <li>SQLite, PostgreSQL, or MySQL support</li>
+        <li>Data retention policies</li>
+        <li>CloudWatch integration</li>
+    </ul>
+
+    <h2>Usage</h2>
+    <pre>POST /api/metrics
+{
+  "metric": "cpu_usage",
+  "value": 75.5,
+  "app_id": "myapp"
+}</pre>
+
+    <h2>Requirements</h2>
+    <ul>
+        <li>Node.js 18+</li>
+        <li>SQLite (included) or PostgreSQL/MySQL</li>
+        <li>Optional: Docker for easy deployment</li>
+    </ul>
+
+    <h2>Use Cases</h2>
+    <ul>
+        <li>Application performance monitoring</li>
+        <li>Business metrics tracking</li>
+        <li>IoT sensor data collection</li>
+        <li>Simple observability for small projects</li>
+        <li>Lightweight alternative to Prometheus</li>
+    </ul>
+
+    <hr>
+    <p><small>MIT License | <a href="https://github.com/emoa2l">@emoa2l</a></small></p>
+</body>
+</html>
