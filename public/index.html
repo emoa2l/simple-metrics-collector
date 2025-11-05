@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metric Collector - Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .auth-section {
+            background: #fff3cd;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            border: 1px solid #ffc107;
+        }
+
+        .auth-section input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            margin-right: 0.5rem;
+        }
+
+        .auth-section button {
+            padding: 0.5rem 1rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .auth-section button:hover {
+            background: #0056b3;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .metrics-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .metrics-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .metric-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .metric-card:hover {
+            border-color: #007bff;
+            box-shadow: 0 2px 8px rgba(0,123,255,0.2);
+        }
+
+        .metric-name {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: #007bff;
+        }
+
+        .metric-info {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .chart-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+            display: none;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .chart-header h2 {
+            font-size: 1.5rem;
+        }
+
+        .chart-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chart-controls button {
+            padding: 0.5rem 1rem;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .chart-controls button.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+
+        .close-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .close-btn:hover {
+            background: #c82333;
+        }
+
+        canvas {
+            max-height: 400px;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: #007bff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Metric Collector</h1>
+            <p class="subtitle">Simple, self-hosted metric aggregation and visualization</p>
+        </header>
+
+        <div class="auth-section">
+            <label for="apiKey">API Key:</label>
+            <input type="password" id="apiKey" placeholder="Enter your API key">
+            <button onclick="setApiKey()">Save</button>
+            <span id="authStatus" style="margin-left: 1rem; color: #666;"></span>
+        </div>
+
+        <div class="error" id="errorMessage"></div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalMetrics">-</div>
+                <div class="stat-label">Total Metrics</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalDataPoints">-</div>
+                <div class="stat-label">Data Points</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="dbSize">-</div>
+                <div class="stat-label">Database Size</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="uptime">-</div>
+                <div class="stat-label">Uptime</div>
+            </div>
+        </div>
+
+        <div class="metrics-section">
+            <h2>Your Metrics</h2>
+            <div class="metrics-list" id="metricsList">
+                <div class="loading">Enter your API key to view metrics</div>
+            </div>
+        </div>
+
+        <div class="chart-section" id="chartSection">
+            <div class="chart-header">
+                <h2 id="chartTitle">Metric Chart</h2>
+                <div class="chart-controls">
+                    <button onclick="changeRange('1h')">1h</button>
+                    <button onclick="changeRange('24h')" class="active">24h</button>
+                    <button onclick="changeRange('7d')">7d</button>
+                    <button onclick="changeRange('30d')">30d</button>
+                    <button class="close-btn" onclick="closeChart()">Close</button>
+                </div>
+            </div>
+            <canvas id="metricChart"></canvas>
+        </div>
+
+        <footer>
+            <p>Built with Metric Collector | <a href="https://github.com/emoa2l/metric-collector">GitHub</a></p>
+        </footer>
+    </div>
+
+    <script>
+        let apiKey = localStorage.getItem('apiKey') || '';
+        let currentMetric = null;
+        let currentRange = '24h';
+        let chart = null;
+
+        if (apiKey) {
+            document.getElementById('apiKey').value = apiKey;
+            document.getElementById('authStatus').textContent = 'Authenticated';
+            loadData();
+        }
+
+        function setApiKey() {
+            apiKey = document.getElementById('apiKey').value;
+            localStorage.setItem('apiKey', apiKey);
+            document.getElementById('authStatus').textContent = 'Authenticated';
+            loadData();
+        }
+
+        async function apiRequest(endpoint, options = {}) {
+            try {
+                const response = await fetch(endpoint, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey,
+                        ...options.headers
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                showError(error.message);
+                throw error;
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        async function loadData() {
+            if (!apiKey) return;
+
+            try {
+                await Promise.all([loadStats(), loadMetrics()]);
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+        }
+
+        async function loadStats() {
+            const stats = await apiRequest('/api/stats');
+
+            document.getElementById('totalMetrics').textContent = stats.totalMetrics;
+            document.getElementById('totalDataPoints').textContent = stats.totalDataPoints.toLocaleString();
+            document.getElementById('dbSize').textContent = formatBytes(stats.databaseSize);
+            document.getElementById('uptime').textContent = formatUptime(stats.uptime);
+        }
+
+        async function loadMetrics() {
+            const metrics = await apiRequest('/api/metrics');
+
+            const listDiv = document.getElementById('metricsList');
+
+            if (metrics.length === 0) {
+                listDiv.innerHTML = '<div class="loading">No metrics yet. Start sending data!</div>';
+                return;
+            }
+
+            listDiv.innerHTML = metrics.map(m => `
+                <div class="metric-card" onclick="viewMetric('${m.metric}')">
+                    <div class="metric-name">${m.metric}</div>
+                    <div class="metric-info">
+                        ${m.count} data points<br>
+                        Last updated: ${formatTimestamp(m.last_updated)}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function viewMetric(metricName) {
+            currentMetric = metricName;
+            document.getElementById('chartTitle').textContent = metricName;
+            document.getElementById('chartSection').style.display = 'block';
+
+            await loadChart();
+        }
+
+        async function loadChart() {
+            const data = await apiRequest(`/api/metrics/${currentMetric}?range=${currentRange}&limit=1000`);
+
+            const ctx = document.getElementById('metricChart').getContext('2d');
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.data.map(d => new Date(d.timestamp).toLocaleString()),
+                    datasets: [{
+                        label: currentMetric,
+                        data: data.data.map(d => parseFloat(d.value) || 0),
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function changeRange(range) {
+            currentRange = range;
+
+            document.querySelectorAll('.chart-controls button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            if (currentMetric) {
+                loadChart();
+            }
+        }
+
+        function closeChart() {
+            document.getElementById('chartSection').style.display = 'none';
+            if (chart) {
+                chart.destroy();
+                chart = null;
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
+        }
+
+        function formatTimestamp(ts) {
+            const date = new Date(ts);
+            const now = Date.now();
+            const diff = now - ts;
+
+            if (diff < 60000) return 'just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+
+            return date.toLocaleDateString();
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            if (apiKey) {
+                loadData();
+                if (currentMetric) {
+                    loadChart();
+                }
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
