@@ -1,8 +1,22 @@
 # Metric Collector
 
-> Simple, self-hosted metric aggregator - just POST metrics and view dashboards
+> Simple, self-hosted metric aggregator for modern applications. Lightweight alternative to Prometheus and Grafana.
 
-A lightweight, easy-to-deploy metric collection and visualization tool. No complex setup, no Prometheus, no bloat. Just send metrics via HTTP POST and view them in a clean dashboard.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
+
+A lightweight metric collection and visualization tool for monitoring applications, IoT devices, and business KPIs. No complex setup, no Prometheus, no bloat. Just send metrics via HTTP POST and view them in auto-generated dashboards.
+
+**Perfect for:** Application monitoring • IoT sensor data • Business metrics • Self-hosted observability • Prometheus alternative
+
+## Documentation
+
+- [Quick Start](#quick-start) - Get started in 5 minutes
+- [Usage Guide](#usage) - API key management, sending metrics, creating alerts
+- [API Reference](#api-reference) - Complete REST API documentation
+- [Configuration](#configuration) - Environment variables and database setup
+- [Deployment](#deployment) - Docker, cloud, and VPS deployment guides
+- [GitHub Pages](https://emoa2l.github.io/simple-metrics-collector/) - Project homepage
 
 ## Features
 
@@ -22,8 +36,8 @@ A lightweight, easy-to-deploy metric collection and visualization tool. No compl
 
 ```bash
 # Clone and run
-git clone https://github.com/emoa2l/metric-collector.git
-cd metric-collector
+git clone https://github.com/emoa2l/simple-metrics-collector.git
+cd simple-metrics-collector
 docker-compose up -d
 
 # Access dashboard at http://localhost:3000
@@ -46,8 +60,8 @@ npm start
 
 ```bash
 # Clone
-git clone https://github.com/emoa2l/metric-collector.git
-cd metric-collector
+git clone https://github.com/emoa2l/simple-metrics-collector.git
+cd simple-metrics-collector
 
 # Install
 npm install
@@ -393,8 +407,14 @@ MIT
 
 ## Support
 
-- GitHub Issues: [Report bugs](https://github.com/emoa2l/metric-collector/issues)
-- GitHub Sponsors: [Support development](https://github.com/sponsors/emoa2l)
+- 📖 [Documentation](https://emoa2l.github.io/simple-metrics-collector/) - Project homepage and guides
+- 🐛 [GitHub Issues](https://github.com/emoa2l/simple-metrics-collector/issues) - Report bugs and request features
+- 💬 [GitHub Discussions](https://github.com/emoa2l/simple-metrics-collector/discussions) - Ask questions and share ideas
+- 💖 [GitHub Sponsors](https://github.com/sponsors/emoa2l) - Support development
+
+## Keywords
+
+`metrics` `monitoring` `self-hosted` `observability` `prometheus-alternative` `grafana-alternative` `dashboard` `nodejs` `iot` `business-metrics` `application-monitoring` `time-series` `sqlite` `postgresql` `mysql` `docker` `api` `rest-api` `multi-tenancy`
 
 ---
 
