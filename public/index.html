@@ -19,7 +19,7 @@
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             padding: 2rem;
         }
@@ -97,22 +97,133 @@
             margin-top: 0.5rem;
         }
 
-        .metrics-section {
+        .controls-section {
             background: white;
-            padding: 2rem;
+            padding: 1.5rem 2rem;
             border-radius: 8px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
         }
 
+        .view-toggle {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .view-toggle button {
+            padding: 0.5rem 1rem;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .view-toggle button.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+
+        .time-range-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .time-range-controls label {
+            font-weight: 500;
+            margin-right: 0.5rem;
+        }
+
+        .time-range-controls button {
+            padding: 0.5rem 1rem;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .time-range-controls button.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+
+        /* Grid View Styles */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .chart-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .chart-card-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e0e0e0;
+            background: #f8f9fa;
+        }
+
+        .chart-card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #007bff;
+            margin-bottom: 0.5rem;
+        }
+
+        .chart-card-stats {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .chart-card-stat {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-card-stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: #999;
+        }
+
+        .chart-card-stat-value {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.95rem;
+        }
+
+        .chart-card-body {
+            padding: 1rem;
+        }
+
+        .chart-card canvas {
+            max-height: 250px;
+        }
+
+        /* List View Styles */
         .metrics-list {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 1rem;
-            margin-top: 1rem;
         }
 
         .metric-card {
+            background: white;
             border: 1px solid #e0e0e0;
             border-radius: 6px;
             padding: 1rem;
@@ -137,7 +248,8 @@
             color: #666;
         }
 
-        .chart-section {
+        /* Single Chart View (for list view) */
+        .single-chart-view {
             background: white;
             padding: 2rem;
             border-radius: 8px;
@@ -146,34 +258,15 @@
             display: none;
         }
 
-        .chart-header {
+        .single-chart-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
         }
 
-        .chart-header h2 {
+        .single-chart-header h2 {
             font-size: 1.5rem;
-        }
-
-        .chart-controls {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .chart-controls button {
-            padding: 0.5rem 1rem;
-            border: 1px solid #ddd;
-            background: white;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .chart-controls button.active {
-            background: #007bff;
-            color: white;
-            border-color: #007bff;
         }
 
         .close-btn {
@@ -187,10 +280,6 @@
 
         .close-btn:hover {
             background: #c82333;
-        }
-
-        canvas {
-            max-height: 400px;
         }
 
         .error {
@@ -208,6 +297,10 @@
             color: #666;
         }
 
+        .hidden {
+            display: none !important;
+        }
+
         footer {
             text-align: center;
             padding: 2rem;
@@ -218,6 +311,21 @@
         footer a {
             color: #007bff;
             text-decoration: none;
+        }
+
+        @media (max-width: 768px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .controls-section {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .time-range-controls {
+                flex-wrap: wrap;
+            }
         }
     </style>
 </head>
@@ -256,25 +364,37 @@
             </div>
         </div>
 
-        <div class="metrics-section">
-            <h2>Your Metrics</h2>
-            <div class="metrics-list" id="metricsList">
-                <div class="loading">Enter your API key to view metrics</div>
+        <div class="controls-section">
+            <div class="view-toggle">
+                <button class="active" onclick="switchView('grid')">Grid View</button>
+                <button onclick="switchView('list')">List View</button>
+            </div>
+            <div class="time-range-controls">
+                <label>Time Range:</label>
+                <button onclick="changeGlobalRange('1h')">1h</button>
+                <button onclick="changeGlobalRange('24h')" class="active">24h</button>
+                <button onclick="changeGlobalRange('7d')">7d</button>
+                <button onclick="changeGlobalRange('30d')">30d</button>
             </div>
         </div>
 
-        <div class="chart-section" id="chartSection">
-            <div class="chart-header">
-                <h2 id="chartTitle">Metric Chart</h2>
-                <div class="chart-controls">
-                    <button onclick="changeRange('1h')">1h</button>
-                    <button onclick="changeRange('24h')" class="active">24h</button>
-                    <button onclick="changeRange('7d')">7d</button>
-                    <button onclick="changeRange('30d')">30d</button>
-                    <button class="close-btn" onclick="closeChart()">Close</button>
-                </div>
+        <!-- Grid View Container -->
+        <div id="gridView" class="metrics-grid">
+            <div class="loading">Enter your API key to view metrics</div>
+        </div>
+
+        <!-- List View Container -->
+        <div id="listView" class="metrics-list hidden">
+            <div class="loading">Enter your API key to view metrics</div>
+        </div>
+
+        <!-- Single Chart View (for list view clicks) -->
+        <div class="single-chart-view" id="singleChartView">
+            <div class="single-chart-header">
+                <h2 id="singleChartTitle">Metric Chart</h2>
+                <button class="close-btn" onclick="closeSingleChart()">Close</button>
             </div>
-            <canvas id="metricChart"></canvas>
+            <canvas id="singleChart"></canvas>
         </div>
 
         <footer>
@@ -284,14 +404,17 @@
 
     <script>
         let apiKey = localStorage.getItem('apiKey') || '';
-        let currentMetric = null;
+        let currentView = 'grid';
         let currentRange = '24h';
-        let chart = null;
+        let charts = {};
+        let singleChart = null;
+        let refreshInterval = null;
 
         if (apiKey) {
             document.getElementById('apiKey').value = apiKey;
             document.getElementById('authStatus').textContent = 'Authenticated';
             loadData();
+            startAutoRefresh();
         }
 
         function setApiKey() {
@@ -299,6 +422,7 @@
             localStorage.setItem('apiKey', apiKey);
             document.getElementById('authStatus').textContent = 'Authenticated';
             loadData();
+            startAutoRefresh();
         }
 
         async function apiRequest(endpoint, options = {}) {
@@ -336,7 +460,13 @@
             if (!apiKey) return;
 
             try {
-                await Promise.all([loadStats(), loadMetrics()]);
+                await loadStats();
+
+                if (currentView === 'grid') {
+                    await loadGridView();
+                } else {
+                    await loadListView();
+                }
             } catch (error) {
                 console.error('Error loading data:', error);
             }
@@ -351,18 +481,83 @@
             document.getElementById('uptime').textContent = formatUptime(stats.uptime);
         }
 
-        async function loadMetrics() {
+        async function loadGridView() {
             const metrics = await apiRequest('/api/metrics');
-
-            const listDiv = document.getElementById('metricsList');
+            const gridView = document.getElementById('gridView');
 
             if (metrics.length === 0) {
-                listDiv.innerHTML = '<div class="loading">No metrics yet. Start sending data!</div>';
+                gridView.innerHTML = '<div class="loading">No metrics yet. Start sending data!</div>';
                 return;
             }
 
-            listDiv.innerHTML = metrics.map(m => `
-                <div class="metric-card" onclick="viewMetric('${m.metric}')">
+            // Destroy existing charts
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            // Load all metrics in parallel
+            const metricsData = await Promise.all(
+                metrics.map(m => apiRequest(`/api/metrics/${m.metric}?range=${currentRange}&limit=1000`))
+            );
+
+            // Create chart cards
+            gridView.innerHTML = metrics.map((m, i) => {
+                const data = metricsData[i].data;
+                const values = data.map(d => parseFloat(d.value) || 0);
+                const latest = values.length > 0 ? values[values.length - 1] : 0;
+                const min = values.length > 0 ? Math.min(...values) : 0;
+                const max = values.length > 0 ? Math.max(...values) : 0;
+                const avg = values.length > 0 ? (values.reduce((a, b) => a + b, 0) / values.length) : 0;
+
+                return `
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <div class="chart-card-title">${m.metric}</div>
+                            <div class="chart-card-stats">
+                                <div class="chart-card-stat">
+                                    <span class="chart-card-stat-label">Latest</span>
+                                    <span class="chart-card-stat-value">${latest.toFixed(2)}</span>
+                                </div>
+                                <div class="chart-card-stat">
+                                    <span class="chart-card-stat-label">Min</span>
+                                    <span class="chart-card-stat-value">${min.toFixed(2)}</span>
+                                </div>
+                                <div class="chart-card-stat">
+                                    <span class="chart-card-stat-label">Max</span>
+                                    <span class="chart-card-stat-value">${max.toFixed(2)}</span>
+                                </div>
+                                <div class="chart-card-stat">
+                                    <span class="chart-card-stat-label">Avg</span>
+                                    <span class="chart-card-stat-value">${avg.toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chart-card-body">
+                            <canvas id="chart-${i}"></canvas>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Create charts after DOM is updated
+            setTimeout(() => {
+                metrics.forEach((m, i) => {
+                    const data = metricsData[i].data;
+                    createChart(`chart-${i}`, m.metric, data);
+                });
+            }, 0);
+        }
+
+        async function loadListView() {
+            const metrics = await apiRequest('/api/metrics');
+            const listView = document.getElementById('listView');
+
+            if (metrics.length === 0) {
+                listView.innerHTML = '<div class="loading">No metrics yet. Start sending data!</div>';
+                return;
+            }
+
+            listView.innerHTML = metrics.map(m => `
+                <div class="metric-card" onclick="viewSingleMetric('${m.metric}')">
                     <div class="metric-name">${m.metric}</div>
                     <div class="metric-info">
                         ${m.count} data points<br>
@@ -372,29 +567,66 @@
             `).join('');
         }
 
-        async function viewMetric(metricName) {
-            currentMetric = metricName;
-            document.getElementById('chartTitle').textContent = metricName;
-            document.getElementById('chartSection').style.display = 'block';
+        function createChart(canvasId, metricName, data) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
 
-            await loadChart();
+            charts[canvasId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                    datasets: [{
+                        label: metricName,
+                        data: data.map(d => parseFloat(d.value) || 0),
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            ticks: {
+                                maxTicksLimit: 6,
+                                maxRotation: 0
+                            }
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
         }
 
-        async function loadChart() {
-            const data = await apiRequest(`/api/metrics/${currentMetric}?range=${currentRange}&limit=1000`);
+        async function viewSingleMetric(metricName) {
+            const data = await apiRequest(`/api/metrics/${metricName}?range=${currentRange}&limit=1000`);
 
-            const ctx = document.getElementById('metricChart').getContext('2d');
+            document.getElementById('singleChartTitle').textContent = metricName;
+            document.getElementById('singleChartView').style.display = 'block';
 
-            if (chart) {
-                chart.destroy();
+            const ctx = document.getElementById('singleChart').getContext('2d');
+
+            if (singleChart) {
+                singleChart.destroy();
             }
 
-            chart = new Chart(ctx, {
+            singleChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: data.data.map(d => new Date(d.timestamp).toLocaleString()),
                     datasets: [{
-                        label: currentMetric,
+                        label: metricName,
                         data: data.data.map(d => parseFloat(d.value) || 0),
                         borderColor: '#007bff',
                         backgroundColor: 'rgba(0, 123, 255, 0.1)',
@@ -426,25 +658,61 @@
             });
         }
 
-        function changeRange(range) {
-            currentRange = range;
+        function closeSingleChart() {
+            document.getElementById('singleChartView').style.display = 'none';
+            if (singleChart) {
+                singleChart.destroy();
+                singleChart = null;
+            }
+        }
 
-            document.querySelectorAll('.chart-controls button').forEach(btn => {
+        function switchView(view) {
+            currentView = view;
+
+            // Update button states
+            document.querySelectorAll('.view-toggle button').forEach(btn => {
                 btn.classList.remove('active');
             });
             event.target.classList.add('active');
 
-            if (currentMetric) {
-                loadChart();
+            // Toggle views
+            if (view === 'grid') {
+                document.getElementById('gridView').classList.remove('hidden');
+                document.getElementById('listView').classList.add('hidden');
+                closeSingleChart();
+                loadGridView();
+            } else {
+                document.getElementById('gridView').classList.add('hidden');
+                document.getElementById('listView').classList.remove('hidden');
+                loadListView();
             }
         }
 
-        function closeChart() {
-            document.getElementById('chartSection').style.display = 'none';
-            if (chart) {
-                chart.destroy();
-                chart = null;
+        function changeGlobalRange(range) {
+            currentRange = range;
+
+            // Update button states
+            document.querySelectorAll('.time-range-controls button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Reload current view
+            if (currentView === 'grid') {
+                loadGridView();
             }
+        }
+
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+
+            refreshInterval = setInterval(() => {
+                if (apiKey) {
+                    loadData();
+                }
+            }, 30000); // Refresh every 30 seconds
         }
 
         function formatBytes(bytes) {
@@ -476,16 +744,6 @@
 
             return date.toLocaleDateString();
         }
-
-        // Auto-refresh every 30 seconds
-        setInterval(() => {
-            if (apiKey) {
-                loadData();
-                if (currentMetric) {
-                    loadChart();
-                }
-            }
-        }, 30000);
     </script>
 </body>
 </html>
