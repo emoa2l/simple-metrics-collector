@@ -8,7 +8,7 @@ const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 const MASTER_KEY = process.env.MASTER_KEY || 'master-key-change-me';
 
 // White-label / Branding configuration
