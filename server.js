@@ -335,6 +335,43 @@ const WebhookConfig = sequelize.define('WebhookConfig', {
 app.use(express.json());
 app.use(express.static('public'));
 
+// Maintenance Mode Middleware
+// Set MAINTENANCE_MODE=true and optionally WHITELISTED_IPS=ip1,ip2,ip3 to enable
+const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE === 'true';
+const WHITELISTED_IPS = process.env.WHITELISTED_IPS ? process.env.WHITELISTED_IPS.split(',').map(ip => ip.trim()) : [];
+
+if (MAINTENANCE_MODE) {
+  console.log('⚠️  MAINTENANCE MODE ENABLED');
+  if (WHITELISTED_IPS.length > 0) {
+    console.log('   Whitelisted IPs:', WHITELISTED_IPS.join(', '));
+  } else {
+    console.log('   All IPs blocked (no whitelist configured)');
+  }
+
+  app.use((req, res, next) => {
+    // Get client IP (handles reverse proxy headers)
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+                     req.headers['x-real-ip'] ||
+                     req.connection.remoteAddress ||
+                     req.socket.remoteAddress;
+
+    // Always allow health checks
+    if (req.path === '/health') {
+      return next();
+    }
+
+    // Check if IP is whitelisted
+    if (WHITELISTED_IPS.length > 0 && WHITELISTED_IPS.includes(clientIp)) {
+      console.log(`✓ Whitelisted IP ${clientIp} accessing site during maintenance`);
+      return next();
+    }
+
+    // Show maintenance page
+    console.log(`✗ Blocking IP ${clientIp} during maintenance mode`);
+    return res.sendFile(path.join(__dirname, 'public', 'under-construction.html'));
+  });
+}
+
 // Helper function to generate API keys
 function generateApiKey() {
   return 'mk_' + crypto.randomBytes(32).toString('hex');

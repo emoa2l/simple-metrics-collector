@@ -986,15 +986,26 @@
 
         async function loadStats() {
             const [stats, alerts] = await Promise.all([
-                apiRequest('/api/stats'),
+                apiRequest('/api/stats').catch(() => null),
                 apiRequest('/api/alerts').catch(() => [])
             ]);
 
-            document.getElementById('totalMetrics').textContent = stats.totalMetrics;
-            document.getElementById('totalDataPoints').textContent = stats.totalDataPoints.toLocaleString();
-            document.getElementById('dbSize').textContent = formatBytes(stats.databaseSize);
-            document.getElementById('uptime').textContent = formatUptime(stats.uptime);
-            document.getElementById('totalAlerts').textContent = alerts.length;
+            // Only update stats if the endpoint returned data
+            if (stats && stats.totalMetrics !== undefined) {
+                document.getElementById('totalMetrics').textContent = stats.totalMetrics;
+            }
+            if (stats && stats.totalDataPoints !== undefined) {
+                document.getElementById('totalDataPoints').textContent = stats.totalDataPoints.toLocaleString();
+            }
+            if (stats && stats.databaseSize !== undefined) {
+                document.getElementById('dbSize').textContent = formatBytes(stats.databaseSize);
+            }
+            if (stats && stats.uptime !== undefined) {
+                document.getElementById('uptime').textContent = formatUptime(stats.uptime);
+            }
+            if (alerts) {
+                document.getElementById('totalAlerts').textContent = alerts.length;
+            }
         }
 
         async function loadGridView() {

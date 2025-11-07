@@ -401,6 +401,10 @@ DATABASE_URL=sqlite://./data/metrics.db                           # SQLite (defa
 # Retention
 RETENTION_DAYS=30  # Auto-delete data older than 30 days
 
+# Maintenance Mode (Optional)
+MAINTENANCE_MODE=false                  # Set to true to enable maintenance mode
+WHITELISTED_IPS=192.168.1.100,10.0.0.5  # Comma-separated IPs allowed during maintenance
+
 # White-Label Branding (Optional)
 APP_NAME=Acme Metrics
 APP_TAGLINE=Real-time Application & Infrastructure Monitoring
@@ -428,6 +432,42 @@ Metric Collector supports multi-tenancy through **App IDs**:
 2. Send metrics with the API key + App ID
 3. View metrics in dashboard with API key + App ID
 4. Each App ID maintains isolated metrics
+
+### Maintenance Mode
+
+Enable maintenance mode during upgrades or system maintenance to show a friendly "Under Maintenance" page to users while you work:
+
+```bash
+# Enable maintenance mode
+export MAINTENANCE_MODE=true
+
+# Optional: Allow specific IPs to access the site (your admin IPs)
+export WHITELISTED_IPS="192.168.1.100,10.0.0.5"
+
+# Restart the server
+npm start
+```
+
+**Features:**
+- Shows a professional "Under Maintenance" page to all visitors
+- Health check endpoint (`/health`) always accessible for monitoring
+- Optional IP whitelist allows admins to access the full site
+- Supports reverse proxy IP detection (x-forwarded-for, x-real-ip headers)
+- Zero configuration needed if you just want to block everyone
+
+**Use Cases:**
+- Database migrations or upgrades
+- Server maintenance windows
+- Testing in production with limited access
+- Debugging issues without user traffic
+
+**Example with Docker:**
+```bash
+docker run -p 3000:3000 \
+  -e MAINTENANCE_MODE=true \
+  -e WHITELISTED_IPS="203.0.113.10,198.51.100.25" \
+  metric-collector
+```
 
 ## Database Support
 
